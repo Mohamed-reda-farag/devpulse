@@ -1,6 +1,25 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL = 'llama-3.3-70b-versatile';
 
+// Groq's free tier is roughly 30 requests/minute (constitution Article II).
+// Firing calls back-to-back with no pacing blew straight through that in
+// production (~350 items normalized in a burst → wall of 429s). One request
+// every 2.2s keeps us under the limit with margin.
+const MIN_INTERVAL_MS = 2200;
+const MAX_RETRIES = 3;
+
+let lastCallAt = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function throttle(): Promise<void> {
+  const wait = MIN_INTERVAL_MS - (Date.now() - lastCallAt);
+  if (wait > 0) await sleep(wait);
+  lastCallAt = Date.now();
+}
+
 interface GroqChatResponse {
   choices?: { message?: { content?: string } }[];
 }
@@ -10,31 +29,54 @@ async function callGroq(systemPrompt: string, userContent: string): Promise<stri
   if (!apiKey) {
     throw new Error('GROQ_API_KEY is not set');
   }
-  const res = await fetch(GROQ_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.3,
-      max_tokens: 300,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Groq API error: HTTP ${res.status} ${res.statusText}`);
+
+  let lastError: Error = new Error('Groq API call did not run');
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await throttle();
+    const res = await fetch(GROQ_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.3,
+        max_tokens: 300,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+      }),
+    });
+
+    if (res.status === 429) {
+      // Respect Retry-After when Groq sends one; otherwise back off
+      // exponentially (2s, 4s, 8s) on top of the base throttle interval.
+      const retryAfterHeader = res.headers.get('retry-after');
+      const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : NaN;
+      const backoffMs = Number.isFinite(retryAfterMs) ? retryAfterMs : 2 ** (attempt + 1) * 1000;
+      lastError = new Error(`Groq API error: HTTP 429 Too Many Requests`);
+      if (attempt < MAX_RETRIES) {
+        await sleep(backoffMs);
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (!res.ok) {
+      throw new Error(`Groq API error: HTTP ${res.status} ${res.statusText}`);
+    }
+
+    const json = (await res.json()) as GroqChatResponse;
+    const content = json.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || content.trim().length === 0) {
+      throw new Error('Groq API returned no content');
+    }
+    return content.trim();
   }
-  const json = (await res.json()) as GroqChatResponse;
-  const content = json.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || content.trim().length === 0) {
-    throw new Error('Groq API returned no content');
-  }
-  return content.trim();
+
+  throw lastError;
 }
 
 /**
