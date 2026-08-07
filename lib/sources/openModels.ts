@@ -8,8 +8,12 @@ import {
 import { logSourceFailure } from '../logger.js';
 import type { SourceResult } from '../types.js';
 
-const AA_URL = 'https://artificialanalysis.ai/api/v2/language/models';
+// Real list-all-models endpoint (verified against docs 2026-08-07). The
+// previous /api/v2/language/models path returned 403 in production — either
+// the wrong path or Cloudflare bot-blocking Node's default fetch UA.
+const AA_URL = 'https://artificialanalysis.ai/api/v2/data/llms/models';
 const LLM_STATS_URL = 'https://api.zeroeval.com/stats/v1/models?limit=100';
+const USER_AGENT = 'DevPulse-Ingestion/1.0 (personal dev-news digest; contact via project owner)';
 
 export const AA_SOURCE_NAME = 'Artificial Analysis';
 export const LLM_STATS_SOURCE_NAME = 'LLM Stats';
@@ -17,6 +21,15 @@ export const LLM_STATS_SOURCE_NAME = 'LLM Stats';
 export type OpenModelsRawItem =
   | { kind: 'artificial_analysis'; model: ArtificialAnalysisModel }
   | { kind: 'llm_stats'; model: LlmStatsModel };
+
+/** Candidate source_url for a raw item — used to dedupe BEFORE the (Groq-free,
+ * but still worth skipping) normalize step, and reused by normalize.ts so the
+ * two never drift apart. */
+export function openModelsItemUrl(item: OpenModelsRawItem): string {
+  return item.kind === 'artificial_analysis'
+    ? `https://artificialanalysis.ai/models/${item.model.slug ?? item.model.id}`
+    : `https://llm-stats.com/models/${item.model.id}`;
+}
 
 async function fetchArtificialAnalysis(): Promise<SourceResult<OpenModelsRawItem>> {
   const apiKey = process.env.ARTIFICIAL_ANALYSIS_API_KEY;
@@ -29,7 +42,7 @@ async function fetchArtificialAnalysis(): Promise<SourceResult<OpenModelsRawItem
     };
   }
   try {
-    const res = await fetch(AA_URL, { headers: { 'x-api-key': apiKey } });
+    const res = await fetch(AA_URL, { headers: { 'x-api-key': apiKey, 'User-Agent': USER_AGENT } });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
     const json: unknown = await res.json();
     const validation = artificialAnalysisSchema.safeParse(json);
@@ -77,7 +90,9 @@ async function fetchLlmStats(): Promise<SourceResult<OpenModelsRawItem>> {
     };
   }
   try {
-    const res = await fetch(LLM_STATS_URL, { headers: { Authorization: `Bearer ${apiKey}` } });
+    const res = await fetch(LLM_STATS_URL, {
+      headers: { Authorization: `Bearer ${apiKey}`, 'User-Agent': USER_AGENT },
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
     const json: unknown = await res.json();
     const validation = llmStatsSchema.safeParse(json);
