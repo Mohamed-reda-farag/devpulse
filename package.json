@@ -1,0 +1,33 @@
+{
+  "name": "devpulse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevPulse — Phase 1: Content Ingestion Pipeline",
+  "type": "module",
+  "scripts": {
+    "ingest": "tsx scripts/ingest.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "build": "tsc --noEmit",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "tsx": "^4.16.5",
+    "vitest": "^2.0.5",
+    "@types/node": "^20.14.15",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "prettier": "^3.3.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
