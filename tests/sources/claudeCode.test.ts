@@ -65,4 +65,21 @@ describe('fetchClaudeCode', () => {
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]?.kind).toBe('source_contract_changed');
   });
+
+  it('caps the number of entries returned so a cold-start run cannot blow through Groq rate limits', async () => {
+    const manyVersions = Array.from({ length: 50 }, (_, i) => `## 1.0.${i}\n- fix ${i}\n`).join('\n');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => `# Changelog\n\n${manyVersions}`,
+      }),
+    );
+
+    const result = await fetchClaudeCode();
+    expect(result.failures).toEqual([]);
+    expect(result.items.length).toBeLessThanOrEqual(15);
+  });
 });

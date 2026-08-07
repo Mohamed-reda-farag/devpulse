@@ -21,6 +21,14 @@ export type DevToolsRawItem =
   | { kind: 'ossinsight'; row: OssInsightRow }
   | { kind: 'hackernews'; story: HackerNewsItem };
 
+/** Candidate source_url for a raw item — used to dedupe before normalize.ts's
+ * (Groq-calling) summarization step, and reused by normalize.ts itself. */
+export function devToolsItemUrl(item: DevToolsRawItem): string {
+  return item.kind === 'ossinsight'
+    ? `https://github.com/${item.row.repo_name}`
+    : (item.story.url ?? `https://news.ycombinator.com/item?id=${item.story.id}`);
+}
+
 // Loose keyword heuristic for "dev tool" relevance among HN top stories. This
 // is a Phase 1 simplification — Phase 3's per-user filtering does the real
 // topic filtering; this just keeps obviously irrelevant HN stories out.

@@ -3,15 +3,19 @@ import { rm } from 'node:fs/promises';
 
 vi.mock('../lib/sources/claudeCode.js', () => ({
   fetchClaudeCode: vi.fn(),
+  claudeCodeEntryUrl: vi.fn((entry: { version: string }) => `https://example.com/claude_code/${entry.version}`),
 }));
 vi.mock('../lib/sources/codex.js', () => ({
   fetchCodex: vi.fn(),
+  codexEntryUrl: vi.fn((entry: { version: string }) => `https://example.com/codex/${entry.version}`),
 }));
 vi.mock('../lib/sources/devTools.js', () => ({
   fetchDevTools: vi.fn(),
+  devToolsItemUrl: vi.fn(() => 'https://example.com/dev_tools'),
 }));
 vi.mock('../lib/sources/openModels.js', () => ({
   fetchOpenModels: vi.fn(),
+  openModelsItemUrl: vi.fn(() => 'https://example.com/open_models'),
 }));
 vi.mock('../lib/sources/hackathons.js', () => ({
   fetchHackathons: vi.fn(),
@@ -25,6 +29,7 @@ vi.mock('../lib/normalize.js', () => ({
   normalizeDevTools: vi.fn(async (items: unknown[]) => items),
   normalizeOpenModels: vi.fn((items: unknown[]) => items),
   normalizeHackathons: vi.fn((items: unknown[]) => items),
+  idFromUrl: vi.fn((url: string) => url),
 }));
 
 vi.mock('../lib/dedupe.js', () => ({
@@ -38,6 +43,8 @@ import { fetchCodex } from '../lib/sources/codex.js';
 import { fetchDevTools } from '../lib/sources/devTools.js';
 import { fetchOpenModels } from '../lib/sources/openModels.js';
 import { fetchHackathons } from '../lib/sources/hackathons.js';
+import { loadSeenIds } from '../lib/dedupe.js';
+import { normalizeCodex } from '../lib/normalize.js';
 
 // This fixture must satisfy several structurally different raw-item types across the mocked
 // fetchers below, so a concrete type isn't practical here.
@@ -89,5 +96,32 @@ describe('runIngest — per-source isolation (FR-004)', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('claude_code'));
 
     consoleErrorSpy.mockRestore();
+  });
+});
+
+describe('runIngest — dedupe happens BEFORE the expensive normalize/Groq step (regression, 2026-08-07)', () => {
+  it('filters out already-seen raw items before calling normalize, not after', async () => {
+    // Real production bug: normalize (which calls Groq) used to run on every
+    // raw item every time, with dedupe only applied afterward — so a
+    // steady-state run still re-summarized hundreds of already-seen
+    // changelog entries and blew through Groq's rate limit. normalize must
+    // only ever see genuinely new items.
+    const seenUrl = 'https://example.com/codex/v1-old';
+    vi.mocked(loadSeenIds).mockResolvedValue(new Set([seenUrl]));
+
+    vi.mocked(fetchClaudeCode).mockResolvedValue({ items: [], failures: [] });
+    vi.mocked(fetchCodex).mockResolvedValue({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      items: [{ version: 'v1-old' }, { version: 'v2-new' }] as any,
+      failures: [],
+    });
+    vi.mocked(fetchDevTools).mockResolvedValue({ items: [], failures: [] });
+    vi.mocked(fetchOpenModels).mockResolvedValue({ items: [], failures: [] });
+    vi.mocked(fetchHackathons).mockResolvedValue({ items: [], failures: [] });
+
+    const { runIngest } = await import('../scripts/ingest.js');
+    await runIngest();
+
+    expect(normalizeCodex).toHaveBeenCalledWith([{ version: 'v2-new' }]);
   });
 });

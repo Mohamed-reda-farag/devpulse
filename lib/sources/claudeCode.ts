@@ -6,6 +6,13 @@ import type { SourceResult } from '../types.js';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md';
 export const SOURCE_NAME = 'Claude Code official changelog';
 
+// Bounds Groq usage on a cold-start run (no seen-ids yet) — this changelog
+// has 350+ historical entries, and summarizing all of them in one run blows
+// straight through Groq's free-tier rate limit. Only the newest N matter for
+// a rolling 3-day digest anyway; the entry-level dedupe (Article V/spec.md)
+// still applies on top of this for steady-state runs.
+const MAX_ENTRIES = 15;
+
 /**
  * Fetches + parses the official Claude Code changelog. Raw payload is
  * validated against `claudeCodeSchema` before any field is read (Article III.11).
@@ -31,7 +38,7 @@ export async function fetchClaudeCode(): Promise<SourceResult<ChangelogEntry>> {
     };
   }
 
-  const parsed = parseMarkdownChangelog(markdown);
+  const parsed = parseMarkdownChangelog(markdown).slice(0, MAX_ENTRIES);
   const validation = claudeCodeSchema.safeParse(parsed);
   if (!validation.success) {
     return {

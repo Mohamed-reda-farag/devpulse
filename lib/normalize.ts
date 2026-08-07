@@ -4,15 +4,17 @@ import type { ChangelogEntry } from './schemas.js';
 import type { HackathonListing } from './sources/hackathons.js';
 import { summarize, translateAndSummarize } from './groqClient.js';
 import { SOURCE_NAME as CLAUDE_CODE_SOURCE_NAME, claudeCodeEntryUrl } from './sources/claudeCode.js';
-import { SOURCE_NAME as CODEX_SOURCE_NAME, SOURCE_PAGE_URL as CODEX_PAGE_URL } from './sources/codex.js';
+import { SOURCE_NAME as CODEX_SOURCE_NAME, codexEntryUrl } from './sources/codex.js';
 import {
   OSSINSIGHT_SOURCE_NAME,
   HN_SOURCE_NAME,
+  devToolsItemUrl,
   type DevToolsRawItem,
 } from './sources/devTools.js';
 import {
   AA_SOURCE_NAME,
   LLM_STATS_SOURCE_NAME,
+  openModelsItemUrl,
   type OpenModelsRawItem,
 } from './sources/openModels.js';
 import {
@@ -71,7 +73,7 @@ export async function normalizeCodex(entries: ChangelogEntry[]): Promise<Content
   const fetchedAt = new Date().toISOString();
   const results: ContentItem[] = [];
   for (const entry of entries) {
-    const url = `${CODEX_PAGE_URL}#${entry.version}`;
+    const url = codexEntryUrl(entry);
     try {
       const summary = await summarize(entry.body, CODEX_SOURCE_NAME);
       results.push({
@@ -101,7 +103,7 @@ export async function normalizeDevTools(items: DevToolsRawItem[]): Promise<Conte
     try {
       if (item.kind === 'ossinsight') {
         const { row } = item;
-        const url = `https://github.com/${row.repo_name}`;
+        const url = devToolsItemUrl(item);
         const summary = await summarize(row.description ?? row.repo_name, OSSINSIGHT_SOURCE_NAME);
         results.push({
           id: idFromUrl(url),
@@ -115,7 +117,7 @@ export async function normalizeDevTools(items: DevToolsRawItem[]): Promise<Conte
         });
       } else {
         const { story } = item;
-        const url = story.url ?? `https://news.ycombinator.com/item?id=${story.id}`;
+        const url = devToolsItemUrl(item);
         const summary = await summarize(story.text ?? story.title ?? '', HN_SOURCE_NAME);
         results.push({
           id: idFromUrl(url),
@@ -145,7 +147,7 @@ export function normalizeOpenModels(items: OpenModelsRawItem[]): ContentItem[] {
   for (const item of items) {
     if (item.kind === 'artificial_analysis') {
       const { model } = item;
-      const url = `https://artificialanalysis.ai/models/${model.slug ?? model.id}`;
+      const url = openModelsItemUrl(item);
       const evalStr = model.evaluations
         ? Object.entries(model.evaluations)
             .map(([k, v]) => `${k}: ${v}`)
@@ -168,7 +170,7 @@ export function normalizeOpenModels(items: OpenModelsRawItem[]): ContentItem[] {
       });
     } else {
       const { model } = item;
-      const url = `https://llm-stats.com/models/${model.id}`;
+      const url = openModelsItemUrl(item);
       const scoresStr = model.top_scores
         ? Object.entries(model.top_scores)
             .map(([k, v]) => `${k}: ${v}`)
