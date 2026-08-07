@@ -39,6 +39,21 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + '…';
 }
 
+/** Formats a metrics record for a human-readable summary: drops metrics that
+ * weren't run for this model (null) and caps the count so the summary stays
+ * readable instead of dumping every published benchmark. */
+function formatMetrics(metrics: Record<string, number | null> | undefined, max = 4): string {
+  if (!metrics) return 'no published benchmark scores yet';
+  const entries = Object.entries(metrics).filter(
+    (entry): entry is [string, number] => entry[1] != null,
+  );
+  if (entries.length === 0) return 'no published benchmark scores yet';
+  return entries
+    .slice(0, max)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(', ');
+}
+
 // ---------------------------------------------------------------------------
 // claude_code — Groq-summarized (one of the four free-text sources)
 // ---------------------------------------------------------------------------
@@ -148,11 +163,7 @@ export function normalizeOpenModels(items: OpenModelsRawItem[]): ContentItem[] {
     if (item.kind === 'artificial_analysis') {
       const { model } = item;
       const url = openModelsItemUrl(item);
-      const evalStr = model.evaluations
-        ? Object.entries(model.evaluations)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join(', ')
-        : 'no published benchmark scores yet';
+      const evalStr = formatMetrics(model.evaluations);
       const summary = truncate(
         `${model.name} (open-weight) from ${model.model_creator.name}` +
           `${model.release_date ? `, released ${model.release_date}` : ''}. Benchmarks — ${evalStr}.`,
@@ -171,11 +182,7 @@ export function normalizeOpenModels(items: OpenModelsRawItem[]): ContentItem[] {
     } else {
       const { model } = item;
       const url = openModelsItemUrl(item);
-      const scoresStr = model.top_scores
-        ? Object.entries(model.top_scores)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join(', ')
-        : 'no published scores yet';
+      const scoresStr = formatMetrics(model.top_scores);
       const summary = truncate(
         `${model.name} (open-weight) from ${model.organization.name}. Scores — ${scoresStr}.`,
         500,

@@ -81,7 +81,9 @@ export const artificialAnalysisModelSchema = z
     model_creator: z.object({ id: z.string(), name: z.string() }),
     release_date: z.string().nullable().optional(),
     open_weights: z.boolean().optional(),
-    evaluations: z.record(z.string(), z.number()).optional(),
+    // Real payload (confirmed live 2026-08-07): individual metrics are `null`
+    // when that benchmark wasn't run for a given model, not always a number.
+    evaluations: z.record(z.string(), z.number().nullable()).optional(),
   })
   .passthrough();
 
@@ -121,7 +123,11 @@ export const llmStatsModelSchema = z
     name: z.string(),
     organization: z.object({ id: z.string(), name: z.string() }),
     license: llmStatsLicenseSchema,
-    top_scores: z.record(z.string(), z.number()).optional(),
+    // Preemptively nullable, matching the same "benchmark not run for this
+    // model" pattern just confirmed on Artificial Analysis's evaluations
+    // field (2026-08-07) — not yet confirmed against a live LLM Stats
+    // response, but the same shape is likely.
+    top_scores: z.record(z.string(), z.number().nullable()).optional(),
   })
   .passthrough();
 

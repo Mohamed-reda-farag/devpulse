@@ -135,6 +135,41 @@ describe('normalize — open_models never calls Groq (Article X sibling rule)', 
     expect(mockedSummarize).not.toHaveBeenCalled();
     expect(mockedTranslateAndSummarize).not.toHaveBeenCalled();
   });
+
+  it('drops null-valued metrics instead of rendering them literally (regression, 2026-08-07)', () => {
+    // Real payload: individual evaluation metrics are null when that
+    // benchmark wasn't run for a given model — must never render as
+    // "metric_name: null" in the summary.
+    const raw: OpenModelsRawItem[] = [
+      {
+        kind: 'artificial_analysis',
+        model: {
+          id: 'some-model',
+          name: 'Some Model',
+          model_creator: { id: 'someorg', name: 'SomeOrg' },
+          evaluations: { mmlu_pro: 82.1, aime_25: null, ifbench: null },
+        },
+      },
+      {
+        kind: 'llm_stats',
+        model: {
+          id: 'all-null-model',
+          name: 'All Null Model',
+          organization: { id: 'someorg', name: 'SomeOrg' },
+          top_scores: { code: null, math: null },
+        },
+      },
+    ];
+
+    const items = normalizeOpenModels(raw);
+
+    expect(items[0]!.summary).toContain('mmlu_pro: 82.1');
+    expect(items[0]!.summary).not.toContain('null');
+    // Every metric was null — falls back to the "no scores" message, not an
+    // empty or malformed benchmarks clause.
+    expect(items[1]!.summary).toContain('no published benchmark scores yet');
+    expect(items[1]!.summary).not.toContain('null');
+  });
 });
 
 describe('normalize — hackathons never leaks free text and follows the extra/summary split (Article X)', () => {
