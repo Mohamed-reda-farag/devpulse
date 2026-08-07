@@ -7,7 +7,12 @@ import { fetchCodex } from '../lib/sources/codex.js';
 import { fetchDevTools } from '../lib/sources/devTools.js';
 import { fetchOpenModels } from '../lib/sources/openModels.js';
 import { fetchHackathons } from '../lib/sources/hackathons.js';
-import { fetchCompanyInternships } from '../lib/sources/companyInternships.js';
+// company_internships is temporarily disabled by project-owner decision
+// (2026-08-07): Wuzzuf's endpoint now 404s, and the ITIDA/ITI scraper
+// selectors were never verified against live markup. The fetcher/normalizer
+// are left importable below (commented) so re-enabling is a one-line change
+// once the real endpoints are confirmed.
+// import { fetchCompanyInternships } from '../lib/sources/companyInternships.js';
 
 import {
   normalizeClaudeCode,
@@ -15,7 +20,7 @@ import {
   normalizeDevTools,
   normalizeOpenModels,
   normalizeHackathons,
-  normalizeCompanyInternships,
+  // normalizeCompanyInternships, // see companyInternships import note above
 } from '../lib/normalize.js';
 
 import { loadSeenIds, partitionNewItems, appendSeenIds } from '../lib/dedupe.js';
@@ -59,7 +64,7 @@ export async function runIngest(): Promise<IngestResult> {
     runSource('dev_tools', fetchDevTools, normalizeDevTools),
     runSource('open_models', fetchOpenModels, (items) => normalizeOpenModels(items)),
     runSource('hackathons', fetchHackathons, (items) => normalizeHackathons(items)),
-    runSource('company_internships', fetchCompanyInternships, normalizeCompanyInternships),
+    // runSource('company_internships', fetchCompanyInternships, normalizeCompanyInternships),
   ]);
 
   const candidates = results.flatMap((r) => r.items);

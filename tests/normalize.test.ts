@@ -171,3 +171,23 @@ describe('normalize — hackathons never leaks free text and follows the extra/s
     expect(mockedTranslateAndSummarize).not.toHaveBeenCalled();
   });
 });
+
+describe('llmStatsLicenseLabel — handles both string and object license shapes', () => {
+  it('returns the string as-is when license is already a string', async () => {
+    const { llmStatsLicenseLabel } = await import('../lib/schemas.js');
+    expect(llmStatsLicenseLabel('Apache 2.0')).toBe('Apache 2.0');
+  });
+
+  it('extracts a name from an object-shaped license', async () => {
+    const { llmStatsLicenseLabel } = await import('../lib/schemas.js');
+    expect(llmStatsLicenseLabel({ name: 'MIT', url: 'https://opensource.org/licenses/MIT' })).toBe(
+      'MIT',
+    );
+  });
+
+  it('returns null when license is missing entirely', async () => {
+    const { llmStatsLicenseLabel } = await import('../lib/schemas.js');
+    expect(llmStatsLicenseLabel(null)).toBeNull();
+    expect(llmStatsLicenseLabel(undefined)).toBeNull();
+  });
+});

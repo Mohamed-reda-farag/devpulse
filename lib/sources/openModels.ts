@@ -1,6 +1,7 @@
 import {
   artificialAnalysisSchema,
   llmStatsSchema,
+  llmStatsLicenseLabel,
   type ArtificialAnalysisModel,
   type LlmStatsModel,
 } from '../schemas.js';
@@ -88,9 +89,10 @@ async function fetchLlmStats(): Promise<SourceResult<OpenModelsRawItem>> {
         ],
       };
     }
-    const openOnly = validation.data.models.filter(
-      (m) => m.license != null && !/proprietary|closed/i.test(m.license),
-    );
+    const openOnly = validation.data.models.filter((m) => {
+      const label = llmStatsLicenseLabel(m.license);
+      return label != null && !/proprietary|closed/i.test(label);
+    });
     return {
       items: openOnly.map((model) => ({ kind: 'llm_stats' as const, model })),
       failures: [],

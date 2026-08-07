@@ -7,6 +7,12 @@ A personalized, 3-day developer digest across six topics: `claude_code`, `codex`
 no database, no web app, and no scheduling yet; those land in Phases 2–4. See `spec.md`, `plan.md`,
 and `tasks.md` for this phase's exact scope, and `constitution.md` for the rules every phase follows.
 
+> **Status (2026-08-07):** `company_internships` is temporarily disabled in `scripts/ingest.ts` by
+> project-owner decision — Wuzzuf's endpoint now returns HTTP 404 (its URL/API has changed), and
+> the ITIDA/ITI scraper selectors were never verified against live markup. Five sources are
+> currently active: `claude_code`, `codex`, `dev_tools`, `open_models`, `hackathons`. Re-enabling
+> `company_internships` is a one-line uncomment in `scripts/ingest.ts` once its sources are fixed.
+
 ## Phase 1: Content Ingestion Pipeline
 
 Fetches from six independent sources, normalizes everything into a single `ContentItem` shape

@@ -16,9 +16,8 @@ vi.mock('../lib/sources/openModels.js', () => ({
 vi.mock('../lib/sources/hackathons.js', () => ({
   fetchHackathons: vi.fn(),
 }));
-vi.mock('../lib/sources/companyInternships.js', () => ({
-  fetchCompanyInternships: vi.fn(),
-}));
+// company_internships is currently disabled in scripts/ingest.ts (see the
+// comment there) — no longer part of the orchestrator's source list.
 
 vi.mock('../lib/normalize.js', () => ({
   normalizeClaudeCode: vi.fn(async (items: unknown[]) => items),
@@ -26,7 +25,6 @@ vi.mock('../lib/normalize.js', () => ({
   normalizeDevTools: vi.fn(async (items: unknown[]) => items),
   normalizeOpenModels: vi.fn((items: unknown[]) => items),
   normalizeHackathons: vi.fn((items: unknown[]) => items),
-  normalizeCompanyInternships: vi.fn(async (items: unknown[]) => items),
 }));
 
 vi.mock('../lib/dedupe.js', () => ({
@@ -40,9 +38,8 @@ import { fetchCodex } from '../lib/sources/codex.js';
 import { fetchDevTools } from '../lib/sources/devTools.js';
 import { fetchOpenModels } from '../lib/sources/openModels.js';
 import { fetchHackathons } from '../lib/sources/hackathons.js';
-import { fetchCompanyInternships } from '../lib/sources/companyInternships.js';
 
-// This fixture must satisfy five structurally different raw-item types across the six mocked
+// This fixture must satisfy several structurally different raw-item types across the mocked
 // fetchers below, so a concrete type isn't practical here.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function fakeItem(tag: string): any {
@@ -64,10 +61,6 @@ beforeEach(() => {
   vi.mocked(fetchDevTools).mockResolvedValue({ items: [fakeItem('dev_tools')], failures: [] });
   vi.mocked(fetchOpenModels).mockResolvedValue({ items: [fakeItem('open_models')], failures: [] });
   vi.mocked(fetchHackathons).mockResolvedValue({ items: [fakeItem('hackathons')], failures: [] });
-  vi.mocked(fetchCompanyInternships).mockResolvedValue({
-    items: [fakeItem('company_internships')],
-    failures: [],
-  });
 });
 
 afterEach(async () => {
@@ -82,9 +75,9 @@ describe('runIngest — per-source isolation (FR-004)', () => {
     const { runIngest } = await import('../scripts/ingest.js');
     const result = await runIngest();
 
-    expect(result.newItems).toHaveLength(5);
+    expect(result.newItems).toHaveLength(4);
     expect(result.newItems.map((i) => i.topic).sort()).toEqual(
-      ['codex', 'company_internships', 'dev_tools', 'hackathons', 'open_models'].sort(),
+      ['codex', 'dev_tools', 'hackathons', 'open_models'].sort(),
     );
 
     expect(result.failures).toHaveLength(1);

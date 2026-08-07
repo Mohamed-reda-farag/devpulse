@@ -95,12 +95,32 @@ export type ArtificialAnalysisModel = z.infer<typeof artificialAnalysisModelSche
 // ---------------------------------------------------------------------------
 // open_models sub-source 2 — LLM Stats Data API (api.zeroeval.com)
 // ---------------------------------------------------------------------------
+
+// The real API returns `license` as an object (e.g. { name, url, id }), not a
+// plain string as originally assumed — discovered against the live endpoint
+// (2026-08-07). Accepting both shapes keeps the schema honest about what's
+// actually out there instead of silently coercing it.
+export const llmStatsLicenseSchema = z
+  .union([
+    z.string(),
+    z
+      .object({
+        name: z.string().optional(),
+        id: z.string().optional(),
+        type: z.string().optional(),
+        url: z.string().optional(),
+      })
+      .passthrough(),
+  ])
+  .nullable()
+  .optional();
+
 export const llmStatsModelSchema = z
   .object({
     id: z.string(),
     name: z.string(),
     organization: z.object({ id: z.string(), name: z.string() }),
-    license: z.string().nullable().optional(),
+    license: llmStatsLicenseSchema,
     top_scores: z.record(z.string(), z.number()).optional(),
   })
   .passthrough();
@@ -111,6 +131,14 @@ export const llmStatsSchema = z
   })
   .passthrough();
 export type LlmStatsModel = z.infer<typeof llmStatsModelSchema>;
+
+/** Normalizes the string-or-object license shape into a single display string. */
+export function llmStatsLicenseLabel(license: LlmStatsModel['license']): string | null {
+  if (license == null) return null;
+  if (typeof license === 'string') return license;
+  return license.name ?? license.id ?? license.type ?? null;
+}
+
 
 // ---------------------------------------------------------------------------
 // hackathons — Devpost's undocumented internal endpoint. `tagline` is the
