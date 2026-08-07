@@ -71,14 +71,25 @@ function parseCodexChangelog(html: string): ChangelogEntry[] {
     if (!title) continue;
 
     // Body = text of the entry's following siblings (New Features, Bug
-    // Fixes, Chores, ...), stopping before the raw per-PR link dump.
+    // Fixes, Chores, ...). Diagnostic against the live page (2026-08-07)
+    // confirmed $h3.next() is ALWAYS empty — the <h3> is the last child of
+    // its own wrapper div, so the body content is a sibling of that
+    // wrapper, not of the <h3> itself.
     let body = '';
-    let node = $h3.next();
+    let node = $h3.parent().next();
     while (node.length > 0) {
       if (node.is('time') || node.find('time').length > 0) break;
       const text = node.text().trim();
-      if (/^Full Changelog:/.test(text)) break;
-      if (text) body += (body ? ' ' : '') + text;
+      body += (body ? ' ' : '') + text;
+      // "Full Changelog:" isn't guaranteed to be its own sibling node — it
+      // can appear mid-way through a single consolidated block alongside
+      // real content, so cut at the substring rather than only checking
+      // whether a whole node starts with it.
+      const cutIndex = body.indexOf('Full Changelog:');
+      if (cutIndex !== -1) {
+        body = body.slice(0, cutIndex);
+        break;
+      }
       if (body.length >= MAX_BODY_CHARS) break;
       node = node.next();
     }

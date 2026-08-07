@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fetchCodex } from '../../lib/sources/codex.js';
 
-// Mirrors the REAL confirmed page structure (verified live 2026-08-07 via a
-// diagnostic dump of the actual DOM): a <time> element immediately preceding
-// an <h3> whose title is split across nested <span>s, plus unrelated nav/
-// sidebar <h3>s with no <time> nearby, plus a "Full Changelog:" PR-link dump
-// that must be excluded from the body.
+// Mirrors the REAL confirmed page structure (verified live 2026-08-07 via two
+// rounds of diagnostic dumps against the actual DOM): a <time> element
+// immediately preceding an <h3> inside a shared "header" wrapper div where
+// the <h3> is always the LAST child (confirmed: h3.next() is empty for all
+// 112 real entries) — the actual body content (New Features, Bug Fixes, ...)
+// lives in a SEPARATE sibling div of that header wrapper, not a sibling of
+// the <h3> itself. Also covers unrelated nav/sidebar <h3>s with no <time>
+// nearby, and the "Full Changelog:" PR-link dump that must be excluded.
 const SAMPLE_HTML = `
 <html><body>
   <nav>
@@ -23,12 +26,12 @@ const SAMPLE_HTML = `
         <span>Codex CLI<span class="text-tertiary"> 0.147.0</span></span>
         <button type="button" aria-label="Copy link"><svg></svg></button>
       </h3>
-      <div>
-        <p>New Features</p>
-        <ul><li>Released gpt-5.1-codex-max to the Responses API</li></ul>
-        <p>Bug Fixes</p>
-        <ul><li>Fixed a crash in MCP tool discovery</li></ul>
-      </div>
+    </div>
+    <div>
+      <p>New Features</p>
+      <ul><li>Released gpt-5.1-codex-max to the Responses API</li></ul>
+      <p>Bug Fixes</p>
+      <ul><li>Fixed a crash in MCP tool discovery</li></ul>
       <p>Full Changelog: <a href="#">rust-v0.146.0...rust-v0.147.0</a></p>
       <ul><li><a href="#">#35623</a> fix(mcp): support 2026-07-28 protocol</li></ul>
     </div>
@@ -41,10 +44,10 @@ const SAMPLE_HTML = `
         <span>Codex CLI<span class="text-tertiary"> 0.146.0</span></span>
         <button type="button" aria-label="Copy link"><svg></svg></button>
       </h3>
-      <div>
-        <p>Chores</p>
-        <ul><li>Reduced startup overhead with concurrent plugin discovery</li></ul>
-      </div>
+    </div>
+    <div>
+      <p>Chores</p>
+      <ul><li>Reduced startup overhead with concurrent plugin discovery</li></ul>
       <p>Full Changelog: <a href="#">rust-v0.145.0...rust-v0.146.0</a></p>
     </div>
   </main>
@@ -72,6 +75,22 @@ describe('fetchCodex', () => {
     expect(result.items).toHaveLength(2);
     expect(result.items[0]?.version).toBe('Codex CLI 0.147.0');
     expect(result.items[0]?.body).toContain('gpt-5.1-codex-max');
+  });
+
+  it('reads body from the header wrapper\'s sibling, not from <h3>\'s own siblings (h3 is always the last child of its wrapper)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => SAMPLE_HTML,
+      }),
+    );
+
+    const result = await fetchCodex();
+    expect(result.items[1]?.version).toBe('Codex CLI 0.146.0');
+    expect(result.items[1]?.body).toContain('Reduced startup overhead');
   });
 
   it('strips the copy-link button from the title and excludes the PR-link dump from the body', async () => {
