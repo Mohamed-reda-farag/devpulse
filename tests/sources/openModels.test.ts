@@ -40,6 +40,23 @@ const LLM_STATS_RESPONSE = {
       license: 'Proprietary',
       top_scores: { code: 94.2 },
     },
+    {
+      // Real-world shape discovered 2026-08-07: license as an object, not a
+      // plain string. Must still validate and be treated as open.
+      id: 'deepseek-v3',
+      name: 'DeepSeek V3',
+      organization: { id: 'deepseek', name: 'DeepSeek' },
+      license: { name: 'MIT', url: 'https://opensource.org/licenses/MIT' },
+      top_scores: { code: 61.7 },
+    },
+    {
+      // Object-shaped license that should still be excluded as proprietary.
+      id: 'some-closed-model',
+      name: 'Some Closed Model',
+      organization: { id: 'someorg', name: 'SomeOrg' },
+      license: { name: 'Proprietary', type: 'closed' },
+      top_scores: { code: 88.0 },
+    },
   ],
 };
 
@@ -87,10 +104,9 @@ describe('fetchOpenModels', () => {
     );
 
     const llmStatsItems = result.items.filter((i) => i.kind === 'llm_stats');
-    expect(llmStatsItems).toHaveLength(1);
-    expect(llmStatsItems[0]?.kind === 'llm_stats' && llmStatsItems[0].model.name).toBe(
-      'Qwen 2.5 72B',
-    );
+    expect(llmStatsItems).toHaveLength(2);
+    const llmStatsNames = llmStatsItems.map((i) => i.kind === 'llm_stats' && i.model.name).sort();
+    expect(llmStatsNames).toEqual(['DeepSeek V3', 'Qwen 2.5 72B'].sort());
   });
 
   it('isolates a failure in one sub-source from the other', async () => {
