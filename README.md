@@ -12,6 +12,15 @@ and `tasks.md` for this phase's exact scope, and `constitution.md` for the rules
 > the ITIDA/ITI scraper selectors were never verified against live markup. Five sources are
 > currently active: `claude_code`, `codex`, `dev_tools`, `open_models`, `hackathons`. Re-enabling
 > `company_internships` is a one-line uncomment in `scripts/ingest.ts` once its sources are fixed.
+>
+> **Fixed after the first real production run (2026-08-07):** three real-world bugs surfaced —
+> LLM Stats' `license` field is an object, not the plain string the schema assumed; the Codex
+> changelog URL/page structure was wrong; and Artificial Analysis's endpoint path was wrong.
+> All three are fixed below. A fourth, more serious issue was also fixed: dedupe was only applied
+> *after* the Groq-calling normalize step, so every run re-summarized hundreds of already-seen
+> changelog entries and blew through Groq's free-tier rate limit. Dedupe now runs *before*
+> normalize, `claude_code`/`codex` are capped to the 15 most recent entries per run, and
+> `groqClient.ts` now paces calls and retries on 429 instead of firing everything at once.
 
 ## Phase 1: Content Ingestion Pipeline
 
