@@ -6,10 +6,12 @@ import type { SourceResult } from '../types.js';
 /**
  * The real page (confirmed live 2026-08-07) is a rendered docs site, not a
  * flat markdown file — developers.openai.com/codex/changelog.md 404s. Each
- * release is an <h3> preceded by a YYYY-MM-DD date, mixed in with unrelated
- * <h3>s from nav/footer sections, and followed by a huge per-PR link list
- * that isn't useful to summarize. We only keep <h3>s with a date immediately
- * before them, and cut body text well before the PR list.
+ * release is a genuine <time>YYYY-MM-DD</time> element immediately followed
+ * (as a sibling of its wrapper div) by an <h3> title, mixed in with ~290
+ * unrelated <h3>s from nav/sidebar/footer sections that have no <time>
+ * nearby. A raw text-regex date search is NOT reliable here — version-like
+ * date strings ("MCP 2026-07-28 protocol") appear inside body text too, so
+ * matching must anchor on the real <time> element, not text pattern-matching.
  */
 const CHANGELOG_URL = 'https://developers.openai.com/codex/changelog';
 export const SOURCE_NAME = 'Codex official changelog';
@@ -33,39 +35,58 @@ export function codexEntryUrl(entry: ChangelogEntry): string {
   return `${SOURCE_PAGE_URL}#${slugify(entry.version)}`;
 }
 
+type CheerioEl = ReturnType<ReturnType<typeof cheerio.load>>;
+
+function findEntryTitle($: ReturnType<typeof cheerio.load>, $time: CheerioEl): CheerioEl {
+  // Observed shape: <div><time>...</time></div><h3>...</h3> as siblings of
+  // time's wrapper div. Try that first; fall back to the nearest h3 inside
+  // time's closest ancestor div, then to the next h3 anywhere after it.
+  const direct = $time.parent().next();
+  if (direct.is('h3')) return direct;
+  const withinAncestor = $time.closest('div').find('h3').first();
+  if (withinAncestor.length > 0) return withinAncestor;
+  return $time.nextAll('h3').first();
+}
+
+function extractTitle($: ReturnType<typeof cheerio.load>, $h3: CheerioEl): string {
+  // The title text is nested in <span> elements; a trailing <button> (a copy-
+  // link icon) has no meaningful text of its own but is stripped defensively
+  // so it can never contaminate the title.
+  return $h3.clone().find('button, svg').remove().end().text().trim();
+}
+
 function parseCodexChangelog(html: string): ChangelogEntry[] {
   const $ = cheerio.load(html);
+  const allTimes = $('time').toArray();
   const entries: ChangelogEntry[] = [];
 
-  $('h3').each((_, el) => {
-    const $el = $(el);
-    const title = $el.text().trim();
-    if (!title) return;
+  for (const timeEl of allTimes) {
+    const $time = $(timeEl);
+    const dateText = $time.text().trim();
+    if (!DATE_PATTERN.test(dateText)) continue;
 
-    // Only treat this h3 as a real entry if a date appears in the text
-    // immediately preceding it (nav/footer h3s like "Topics" or "Recent"
-    // won't have one).
-    const precedingText = $el.prevAll().slice(0, 3).text();
-    if (!DATE_PATTERN.test(precedingText)) return;
+    const $h3 = findEntryTitle($, $time);
+    if ($h3.length === 0) continue;
+    const title = extractTitle($, $h3);
+    if (!title) continue;
 
-    // Body = text of siblings up to the next heading, stopping early once we
-    // hit the raw per-PR "Full Changelog:" link dump.
+    // Body = text of the entry's following siblings (New Features, Bug
+    // Fixes, Chores, ...), stopping before the raw per-PR link dump.
     let body = '';
-    let node = $el.next();
+    let node = $h3.next();
     while (node.length > 0) {
-      const tag = (node.get(0) as { tagName?: string } | undefined)?.tagName?.toLowerCase();
-      if (tag === 'h3') break;
+      if (node.is('time') || node.find('time').length > 0) break;
       const text = node.text().trim();
-      if (/^Full Changelog:/.test(text) || text.startsWith('[#')) break;
+      if (/^Full Changelog:/.test(text)) break;
       if (text) body += (body ? ' ' : '') + text;
       if (body.length >= MAX_BODY_CHARS) break;
       node = node.next();
     }
     body = body.slice(0, MAX_BODY_CHARS).trim();
-    if (!body) return;
+    if (!body) continue;
 
     entries.push({ version: title, body });
-  });
+  }
 
   return entries.slice(0, MAX_ENTRIES);
 }

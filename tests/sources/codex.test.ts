@@ -1,29 +1,52 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fetchCodex } from '../../lib/sources/codex.js';
 
-// Mirrors the real page's structure (confirmed live 2026-08-07): a date line
-// immediately before each entry's <h3>, unrelated nav/footer <h3>s elsewhere
-// on the page, and a "Full Changelog:" PR-link dump that must be excluded.
+// Mirrors the REAL confirmed page structure (verified live 2026-08-07 via a
+// diagnostic dump of the actual DOM): a <time> element immediately preceding
+// an <h3> whose title is split across nested <span>s, plus unrelated nav/
+// sidebar <h3>s with no <time> nearby, plus a "Full Changelog:" PR-link dump
+// that must be excluded from the body.
 const SAMPLE_HTML = `
 <html><body>
-  <nav><h3>Getting Started</h3><p>Some nav content</p></nav>
+  <nav>
+    <h3>Suggested</h3>
+    <h3>Get started</h3>
+  </nav>
   <main>
     <h1>Codex changelog</h1>
-    <div>2026-06-09</div>
-    <h3>Codex CLI 0.139.0</h3>
-    <ul>
-      <li>Released gpt-5.1-codex-max to the Responses API</li>
-      <li>Added support for rendering Mermaid diagrams inline in task transcripts</li>
-    </ul>
-    <p>Full Changelog: <a href="#">rust-v0.138.0...rust-v0.139.0</a></p>
-    <ul><li>[#26741](url) fix(remote-control): preserve enrollment</li></ul>
 
-    <div>2026-06-04</div>
-    <h3>Codex CLI 0.137.0</h3>
-    <ul>
-      <li>Reduced startup and large-context overhead with concurrent skill/plugin discovery</li>
-    </ul>
-    <p>Full Changelog: <a href="#">rust-v0.136.0...rust-v0.137.0</a></p>
+    <div class="flex flex-col gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <time class="text-sm text-secondary">2026-08-07</time>
+      </div>
+      <h3 class="group flex items-center gap-2 heading-xl mb-4">
+        <span>Codex CLI<span class="text-tertiary"> 0.147.0</span></span>
+        <button type="button" aria-label="Copy link"><svg></svg></button>
+      </h3>
+      <div>
+        <p>New Features</p>
+        <ul><li>Released gpt-5.1-codex-max to the Responses API</li></ul>
+        <p>Bug Fixes</p>
+        <ul><li>Fixed a crash in MCP tool discovery</li></ul>
+      </div>
+      <p>Full Changelog: <a href="#">rust-v0.146.0...rust-v0.147.0</a></p>
+      <ul><li><a href="#">#35623</a> fix(mcp): support 2026-07-28 protocol</li></ul>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <time class="text-sm text-secondary">2026-07-30</time>
+      </div>
+      <h3 class="group flex items-center gap-2 heading-xl mb-4">
+        <span>Codex CLI<span class="text-tertiary"> 0.146.0</span></span>
+        <button type="button" aria-label="Copy link"><svg></svg></button>
+      </h3>
+      <div>
+        <p>Chores</p>
+        <ul><li>Reduced startup overhead with concurrent plugin discovery</li></ul>
+      </div>
+      <p>Full Changelog: <a href="#">rust-v0.145.0...rust-v0.146.0</a></p>
+    </div>
   </main>
   <footer><h3>Topics</h3><p>Agents, Evals, Multimodal</p></footer>
 </body></html>`;
@@ -33,7 +56,7 @@ afterEach(() => {
 });
 
 describe('fetchCodex', () => {
-  it('parses entries whose <h3> is preceded by a date, ignoring nav/footer headings', async () => {
+  it('parses entries anchored on a real <time> element, ignoring nav/footer headings', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -47,11 +70,11 @@ describe('fetchCodex', () => {
     const result = await fetchCodex();
     expect(result.failures).toEqual([]);
     expect(result.items).toHaveLength(2);
-    expect(result.items[0]?.version).toBe('Codex CLI 0.139.0');
+    expect(result.items[0]?.version).toBe('Codex CLI 0.147.0');
     expect(result.items[0]?.body).toContain('gpt-5.1-codex-max');
   });
 
-  it('excludes the Full Changelog PR-link dump from the parsed body', async () => {
+  it('strips the copy-link button from the title and excludes the PR-link dump from the body', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -64,9 +87,27 @@ describe('fetchCodex', () => {
 
     const result = await fetchCodex();
     for (const entry of result.items) {
+      expect(entry.version).not.toContain('Copy link');
       expect(entry.body).not.toContain('Full Changelog');
-      expect(entry.body).not.toContain('#26741');
+      expect(entry.body).not.toContain('#35623');
     }
+  });
+
+  it('does not mistake a date-like string inside body text for a real entry boundary', async () => {
+    // "2026-07-28" appears inside the first entry's own PR-link text, before
+    // the cutoff — must not be picked up as a second, spurious entry.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => SAMPLE_HTML,
+      }),
+    );
+
+    const result = await fetchCodex();
+    expect(result.items.map((e) => e.version)).toEqual(['Codex CLI 0.147.0', 'Codex CLI 0.146.0']);
   });
 
   it('reports a fetch_error failure on an HTTP error status', async () => {
