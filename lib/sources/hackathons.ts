@@ -22,14 +22,34 @@ export interface HackathonListing {
   tags: string[];
 }
 
+/**
+ * Devpost's real payload embeds raw HTML inside otherwise-plain fields — e.g.
+ * prize_amount arrives as `"$<span data-currency-value>0</span>"`, not a
+ * clean "$0" (confirmed against a live item, 2026-08-08). Zod's `z.string()`
+ * happily accepts that shape, so the schema alone can't catch it; this strips
+ * markup before any of these fields are ever displayed or inlined into a
+ * summary.
+ */
+function stripHtml(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function toListing(raw: DevpostHackathon): HackathonListing {
   return {
     id: raw.id,
-    title: raw.title,
+    title: stripHtml(raw.title),
     url: raw.url,
-    prize: raw.prize_amount ?? null,
-    deadline: raw.submission_period_dates ?? null,
-    tags: (raw.themes ?? []).map((t) => (typeof t === 'string' ? t : t.name)),
+    prize: raw.prize_amount ? stripHtml(raw.prize_amount) : null,
+    deadline: raw.submission_period_dates ? stripHtml(raw.submission_period_dates) : null,
+    tags: (raw.themes ?? []).map((t) => stripHtml(typeof t === 'string' ? t : t.name)),
   };
 }
 

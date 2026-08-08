@@ -95,4 +95,44 @@ describe('fetchHackathons', () => {
     );
     expect(JSON.stringify(listing)).not.toContain('whirlwind weekend');
   });
+
+  it('strips embedded HTML from prize/deadline/title/tags (regression, real item 2026-08-08)', async () => {
+    // Exact shape confirmed from a real Devpost API response: prize_amount
+    // arrives with a currency-formatting <span> embedded in it, not clean text.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          hackathons: [
+            {
+              id: '4c9dd07a11271349a4bb5ad4',
+              title: 'SpaceXAI Grokathon',
+              url: 'https://spacexai-grokathon.devpost.com/',
+              prize_amount: '$<span data-currency-value>0</span>',
+              submission_period_dates: 'Aug 08 - 09, 2026',
+              themes: ['Machine Learning/AI'],
+            },
+          ],
+        }),
+      }),
+    );
+
+    const result = await fetchHackathons();
+    expect(result.failures).toEqual([]);
+    expect(result.items).toEqual([
+      {
+        id: '4c9dd07a11271349a4bb5ad4',
+        title: 'SpaceXAI Grokathon',
+        url: 'https://spacexai-grokathon.devpost.com/',
+        prize: '$0',
+        deadline: 'Aug 08 - 09, 2026',
+        tags: ['Machine Learning/AI'],
+      },
+    ]);
+    expect(result.items[0]?.prize).not.toContain('<');
+    expect(result.items[0]?.prize).not.toContain('span');
+  });
 });

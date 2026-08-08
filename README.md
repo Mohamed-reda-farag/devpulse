@@ -26,7 +26,7 @@ and `tasks.md` for this phase's exact scope, and `constitution.md` for the rules
 
 ## Phase 1: Content Ingestion Pipeline
 
-Fetches from six independent sources, normalizes everything into a single `ContentItem` shape
+Fetches from five independent sources, normalizes everything into a single `ContentItem` shape
 (constitution Article V), deduplicates against previous runs, and writes the result to a local
 JSON file for manual inspection. Runnable with one command; no scheduling, no per-user filtering.
 
@@ -90,18 +90,20 @@ npm run build    # tsc --noEmit
 ```
 
 All source-fetcher and normalization tests run against static mocked fixtures — **no live network
-calls happen in the automated suite** (constitution Article VI). 38 tests currently pass across 9
+calls happen in the automated suite** (constitution Article VI). 39 tests currently pass across 9
 files, covering dedupe logic, all five source fetchers (including sub-source isolation and the
 distinct `source_contract_changed` failure mode), the normalize layer's Groq usage boundaries, and
 the orchestrator's per-source failure isolation and dedupe-before-normalize ordering.
 
 ### What's verified vs. what needs your local run
 
-All five sources have now been run against the real internet with real keys (confirmed by the
-project owner, 2026-08-08): a full `npm run ingest` produced items from `claude_code`, `codex`,
-`dev_tools`, and `open_models` with zero source failures, and a second consecutive run correctly
-produced zero new items (SC-002). `hackathons` has not yet been confirmed to produce a real item in
-a live run (Devpost may simply have had no open hackathons at the time) — worth a spot-check.
+All five sources have been run against the real internet with real keys and confirmed working
+(project owner, 2026-08-08): a full `npm run ingest` produced items from all five with zero source
+failures, and a second consecutive run correctly produced zero new items (SC-002). `hackathons`
+specifically was confirmed via a real item found in `data/content-items-history.jsonl` — which is
+also how a real data-quality bug was caught: Devpost's `prize_amount` field arrives with raw HTML
+embedded in it (e.g. `"$<span data-currency-value>0</span>"`), not clean text. Fixed in
+`lib/sources/hackathons.ts` (`stripHtml()`), with a regression test using the exact real payload.
 
 ## Project structure
 
