@@ -2,32 +2,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../lib/groqClient.js', () => ({
   summarize: vi.fn(),
-  translateAndSummarize: vi.fn(),
 }));
 
-import { summarize, translateAndSummarize } from '../lib/groqClient.js';
+import { summarize } from '../lib/groqClient.js';
 import {
   normalizeClaudeCode,
   normalizeCodex,
   normalizeDevTools,
   normalizeOpenModels,
   normalizeHackathons,
-  normalizeCompanyInternships,
 } from '../lib/normalize.js';
 import type { HackathonListing } from '../lib/sources/hackathons.js';
 import type { OpenModelsRawItem } from '../lib/sources/openModels.js';
-import type { CompanyInternshipsRawItem } from '../lib/sources/companyInternships.js';
 import type { DevToolsRawItem } from '../lib/sources/devTools.js';
 
 const mockedSummarize = vi.mocked(summarize);
-const mockedTranslateAndSummarize = vi.mocked(translateAndSummarize);
 
 beforeEach(() => {
   mockedSummarize.mockReset();
-  mockedTranslateAndSummarize.mockReset();
 });
 
-describe('normalize — four free-text sources use Groq and never echo raw input verbatim', () => {
+describe('normalize — free-text sources use Groq and never echo raw input verbatim', () => {
   it('claude_code: summary comes from Groq and is not a substring of the raw body', async () => {
     const rawBody =
       '- Added guard against launching Claude Code inside another Claude Code session';
@@ -66,38 +61,6 @@ describe('normalize — four free-text sources use Groq and never echo raw input
     expect(items[0]!.summary).not.toContain('A fast CLI tool.');
     expect(mockedSummarize).toHaveBeenCalled();
   });
-
-  it('company_internships: Arabic fixtures produce an English-language summary via translateAndSummarize', async () => {
-    mockedTranslateAndSummarize.mockResolvedValue({
-      title: 'ITIDA Summer Internship Program',
-      summary: 'An intensive summer training program for Egyptian IT graduates and students.',
-    });
-
-    const raw: CompanyInternshipsRawItem[] = [
-      {
-        kind: 'itida',
-        listing: {
-          title_ar: 'برنامج التدريب الصيفي لتكنولوجيا المعلومات',
-          url: '/programs/summer-training-2026',
-          deadline_ar: 'الموعد النهائي: 15 أغسطس 2026',
-          description_ar: 'برنامج تدريبي مكثف لخريجي وطلاب تكنولوجيا المعلومات في مصر.',
-        },
-      },
-    ];
-
-    const items = await normalizeCompanyInternships(raw);
-
-    expect(items).toHaveLength(1);
-    expect(items[0]!.title).toBe('ITIDA Summer Internship Program');
-    expect(items[0]!.summary).toBe(
-      'An intensive summer training program for Egyptian IT graduates and students.',
-    );
-    // Purely-Latin-script assertion is a light proxy for "is English" — no Arabic
-    // characters should remain in the final title/summary.
-    expect(/[\u0600-\u06FF]/.test(items[0]!.title)).toBe(false);
-    expect(/[\u0600-\u06FF]/.test(items[0]!.summary)).toBe(false);
-    expect(mockedTranslateAndSummarize).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe('normalize — open_models never calls Groq (Article X sibling rule)', () => {
@@ -133,7 +96,6 @@ describe('normalize — open_models never calls Groq (Article X sibling rule)', 
     expect(items[0]!.summary).toContain('intelligence_index');
     expect(items[1]!.summary).toContain('code');
     expect(mockedSummarize).not.toHaveBeenCalled();
-    expect(mockedTranslateAndSummarize).not.toHaveBeenCalled();
   });
 
   it('drops null-valued metrics instead of rendering them literally (regression, 2026-08-07)', () => {
@@ -203,7 +165,6 @@ describe('normalize — hackathons never leaks free text and follows the extra/s
 
     // Groq is never called for hackathons.
     expect(mockedSummarize).not.toHaveBeenCalled();
-    expect(mockedTranslateAndSummarize).not.toHaveBeenCalled();
   });
 });
 

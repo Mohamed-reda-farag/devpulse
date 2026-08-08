@@ -4,7 +4,7 @@ import type { SourceResult } from '../types.js';
 
 // Undocumented internal endpoint (no public API is published for Devpost —
 // confirmed during spec review). Fragile by design; wrapped in explicit
-// try/catch per plan.md, same treatment as the company_internships sub-sources.
+// try/catch per plan.md.
 const DEVPOST_URL = 'https://devpost.com/api/hackathons?status[]=open&order_by=recently-added';
 export const SOURCE_NAME = 'Devpost';
 

@@ -5,14 +5,7 @@
  * (database, digest generation, notifications) depends on it staying stable.
  */
 
-export const TOPICS = [
-  'claude_code',
-  'codex',
-  'dev_tools',
-  'open_models',
-  'hackathons',
-  'company_internships',
-] as const;
+export const TOPICS = ['claude_code', 'codex', 'dev_tools', 'open_models', 'hackathons'] as const;
 
 export type Topic = (typeof TOPICS)[number];
 

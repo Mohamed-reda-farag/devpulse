@@ -20,8 +20,6 @@ vi.mock('../lib/sources/openModels.js', () => ({
 vi.mock('../lib/sources/hackathons.js', () => ({
   fetchHackathons: vi.fn(),
 }));
-// company_internships is currently disabled in scripts/ingest.ts (see the
-// comment there) — no longer part of the orchestrator's source list.
 
 vi.mock('../lib/normalize.js', () => ({
   normalizeClaudeCode: vi.fn(async (items: unknown[]) => items),
@@ -73,10 +71,11 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks();
   await rm('data/content-items.json', { force: true });
+  await rm('data/content-items-history.jsonl', { force: true });
 });
 
 describe('runIngest — per-source isolation (FR-004)', () => {
-  it('returns results from the other five sources when one fetcher throws, with a failure entry naming it', async () => {
+  it('returns results from the other four sources when one fetcher throws, with a failure entry naming it', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     const { runIngest } = await import('../scripts/ingest.js');
@@ -123,5 +122,35 @@ describe('runIngest — dedupe happens BEFORE the expensive normalize/Groq step 
     await runIngest();
 
     expect(normalizeCodex).toHaveBeenCalledWith([{ version: 'v2-new' }]);
+  });
+});
+
+describe('runIngest — cross-run history file (fix for reported bug, 2026-08-08)', () => {
+  it('accumulates items across multiple runs in the history file, unlike content-items.json which is overwritten each run', async () => {
+    const { readFile } = await import('node:fs/promises');
+
+    vi.mocked(loadSeenIds).mockResolvedValue(new Set());
+
+    // Run 1: two sources succeed with one item each.
+    vi.mocked(fetchClaudeCode).mockResolvedValue({ items: [], failures: [] });
+    vi.mocked(fetchCodex).mockResolvedValue({ items: [], failures: [] });
+    vi.mocked(fetchDevTools).mockResolvedValue({ items: [fakeItem('dev_tools')], failures: [] });
+    vi.mocked(fetchOpenModels).mockResolvedValue({ items: [], failures: [] });
+    vi.mocked(fetchHackathons).mockResolvedValue({ items: [fakeItem('hackathons')], failures: [] });
+
+    const { runIngest } = await import('../scripts/ingest.js');
+    await runIngest();
+
+    // Run 2: nothing new (as if everything from run 1 is now already-seen) —
+    // content-items.json would go back to empty, but history must keep run 1's items.
+    vi.mocked(fetchDevTools).mockResolvedValue({ items: [], failures: [] });
+    vi.mocked(fetchHackathons).mockResolvedValue({ items: [], failures: [] });
+    await runIngest();
+
+    const historyRaw = await readFile('data/content-items-history.jsonl', 'utf-8');
+    const historyLines = historyRaw.trim().split('\n');
+    expect(historyLines).toHaveLength(2);
+    const topics = historyLines.map((line) => JSON.parse(line).topic).sort();
+    expect(topics).toEqual(['dev_tools', 'hackathons']);
   });
 });

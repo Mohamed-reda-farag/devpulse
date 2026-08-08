@@ -1,26 +1,28 @@
 # DevPulse
 
-A personalized, 3-day developer digest across six topics: `claude_code`, `codex`, `dev_tools`,
-`open_models`, `hackathons`, and `company_internships` (Egypt/regional programs only).
+A personalized, 3-day developer digest across five topics: `claude_code`, `codex`, `dev_tools`,
+`open_models`, and `hackathons`.
 
 **This repository currently implements Phase 1 only** — the content ingestion pipeline. There is
 no database, no web app, and no scheduling yet; those land in Phases 2–4. See `spec.md`, `plan.md`,
 and `tasks.md` for this phase's exact scope, and `constitution.md` for the rules every phase follows.
 
-> **Status (2026-08-07):** `company_internships` is temporarily disabled in `scripts/ingest.ts` by
-> project-owner decision — Wuzzuf's endpoint now returns HTTP 404 (its URL/API has changed), and
-> the ITIDA/ITI scraper selectors were never verified against live markup. Five sources are
-> currently active: `claude_code`, `codex`, `dev_tools`, `open_models`, `hackathons`. Re-enabling
-> `company_internships` is a one-line uncomment in `scripts/ingest.ts` once its sources are fixed.
+> **Status (2026-08-08):** `company_internships` (ITIDA/ITI/Wuzzuf) has been **fully removed** by
+> explicit project-owner decision — not disabled, deleted: the source module, its Zod schemas, its
+> normalize branch, its tests, and every reference to it are gone. The scope is now five topics.
+> If this is revisited later, it needs to be rebuilt from scratch against real, verified endpoints
+> (Wuzzuf's was already confirmed dead — HTTP 404 — before removal), not restored from history.
 >
-> **Fixed after the first real production run (2026-08-07):** three real-world bugs surfaced —
-> LLM Stats' `license` field is an object, not the plain string the schema assumed; the Codex
-> changelog URL/page structure was wrong; and Artificial Analysis's endpoint path was wrong.
-> All three are fixed below. A fourth, more serious issue was also fixed: dedupe was only applied
-> *after* the Groq-calling normalize step, so every run re-summarized hundreds of already-seen
-> changelog entries and blew through Groq's free-tier rate limit. Dedupe now runs *before*
-> normalize, `claude_code`/`codex` are capped to the 15 most recent entries per run, and
-> `groqClient.ts` now paces calls and retries on 429 instead of firing everything at once.
+> **Also fixed after the first real production runs (2026-08-07 – 2026-08-08):** LLM Stats'
+> `license` field turned out to be an object, not the plain string the schema assumed; Artificial
+> Analysis's endpoint path and the Codex changelog's real DOM structure were both wrong on the
+> first attempt and corrected against live diagnostics; some benchmark metrics come back `null`
+> and are now dropped instead of rendered literally; dedupe now runs *before* the Groq-calling
+> normalize step (it used to run after, so every run re-summarized hundreds of already-seen items
+> and blew through Groq's rate limit); `claude_code`/`codex` are capped to the 15 most recent
+> entries per run; `groqClient.ts` paces calls and retries on 429; and a `content-items-history.jsonl`
+> file was added since `content-items.json` is overwritten every run (by design) and was mistaken
+> for a bug when it went empty after a run with zero new items.
 
 ## Phase 1: Content Ingestion Pipeline
 
@@ -45,7 +47,7 @@ cp .env.example .env.local
 
 | Variable | Used by | Where to get it |
 |---|---|---|
-| `GROQ_API_KEY` | Summarizing/translating `claude_code`, `codex`, `dev_tools`, `company_internships` (`llama-3.3-70b-versatile`, free tier) | https://console.groq.com |
+| `GROQ_API_KEY` | Summarizing `claude_code`, `codex`, `dev_tools` (`llama-3.3-70b-versatile`, free tier) | https://console.groq.com |
 | `ARTIFICIAL_ANALYSIS_API_KEY` | One of `open_models`'s two sub-sources | https://artificialanalysis.ai/insights |
 | `LLM_STATS_API_KEY` | The other `open_models` sub-source | https://llm-stats.com/developer |
 
@@ -60,12 +62,19 @@ npm run ingest
 
 This writes:
 - **`data/content-items.json`** — the new items from *this* run only (overwritten every run; not
-  a cumulative history — Phase 2's database becomes the historical record).
+  a cumulative history — Phase 2's database becomes the historical record). **This means running
+  `npm run ingest` twice in a row typically leaves this file empty** (nothing new on the second
+  run) — that's expected, not a bug, but it's easy to mistake for one if you check the file after
+  more than one run.
+- **`data/content-items-history.jsonl`** — every item found across *all* runs, one JSON object per
+  line, never overwritten. Not part of the original Article V contract; added purely so a human
+  can review what's been found without racing the per-run overwrite above. Check this file, not
+  `content-items.json`, if you want to see everything the pipeline has produced so far.
 - **`data/seen-ids.json`** — an append-only index of every item id ever produced, used to decide
   "is this new?" on the next run. Never overwritten, only grown.
 
 `data/` is a deliberate, time-boxed exception to Article IV's fixed folder structure, scoped to
-this phase only — both files disappear once Phase 2 replaces them with Supabase tables.
+this phase only — all three files disappear once Phase 2 replaces them with Supabase tables.
 
 Console output after a run summarizes how many new items were found, how many were already seen,
 and lists any source failures with their kind (`fetch_error` vs `source_contract_changed`) and
@@ -81,50 +90,36 @@ npm run build    # tsc --noEmit
 ```
 
 All source-fetcher and normalization tests run against static mocked fixtures — **no live network
-calls happen in the automated suite** (constitution Article VI). 31 tests currently pass across 9
-files, covering dedupe logic, all six source fetchers (including sub-source isolation and the
+calls happen in the automated suite** (constitution Article VI). 38 tests currently pass across 9
+files, covering dedupe logic, all five source fetchers (including sub-source isolation and the
 distinct `source_contract_changed` failure mode), the normalize layer's Groq usage boundaries, and
-the orchestrator's per-source failure isolation.
-
-### Scope note: `company_internships`
-
-Scoped to Egypt/regional programs only (ITIDA, ITI, Wuzzuf) by explicit project-owner decision —
-internship listings are inherently tied to a country's job market, unlike the other five topics.
-None of the three have a documented public API, so they're scraped; **the CSS selectors in
-`lib/sources/companyInternships.ts` are a best-effort starting point and have not been verified
-against the live markup** (those three domains aren't reachable from the environment this phase
-was built in). Verify and adjust before relying on real output from this source. Wuzzuf's terms of
-service specifically have not been reviewed for scraping — flagged for Phase 7's hardening pass,
-not assumed to be fine.
+the orchestrator's per-source failure isolation and dedupe-before-normalize ordering.
 
 ### What's verified vs. what needs your local run
 
-- `claude_code`'s fetcher was run live against the real changelog endpoint during development (353
-  entries parsed, zero validation failures) — this one is confirmed working end-to-end.
-- The other five sources' real endpoints/response shapes were researched but not exercised live
-  (either the domain wasn't reachable from the build environment, or a real API key was needed).
-  Automated tests simulate their success/failure paths with realistic mocked fixtures instead.
-- Running `npm run ingest` twice in a row with real keys (SC-002) and deliberately breaking one
-  source at a time (SC-003) — described in `tasks.md` T023/T024 — still need to happen against
-  the real internet with your own keys before this phase is considered fully verified.
+All five sources have now been run against the real internet with real keys (confirmed by the
+project owner, 2026-08-08): a full `npm run ingest` produced items from `claude_code`, `codex`,
+`dev_tools`, and `open_models` with zero source failures, and a second consecutive run correctly
+produced zero new items (SC-002). `hackathons` has not yet been confirmed to produce a real item in
+a live run (Devpost may simply have had no open hackathons at the time) — worth a spot-check.
 
 ## Project structure
 
 ```
 /lib
   types.ts            Shared ContentItem contract (Article V)
-  schemas.ts           10 Zod schemas, one per raw payload shape (Article III.11)
+  schemas.ts           7 Zod schemas, one per raw payload shape (Article III.11)
   logger.ts             fetch_error vs source_contract_changed logging
-  groqClient.ts         Groq API wrapper (mockable)
+  groqClient.ts         Groq API wrapper (mockable, rate-limited, retries on 429)
   parseChangelog.ts    Shared markdown changelog parser
   normalize.ts          Converts every source's raw output into ContentItem
   dedupe.ts              Checks candidates against data/seen-ids.json
   /sources
-    claudeCode.ts codex.ts devTools.ts openModels.ts hackathons.ts companyInternships.ts
+    claudeCode.ts codex.ts devTools.ts openModels.ts hackathons.ts
 /scripts
-  ingest.ts             Orchestrates all six sources with per-source isolation
+  ingest.ts             Orchestrates all five sources with per-source isolation
 /tests
-  dedupe.test.ts normalize.test.ts ingest.test.ts
+  dedupe.test.ts normalize.test.ts ingest.test.ts groqClient.test.ts
   /sources  (one test file per topic)
 /data                  Phase-1-only run state (gitignored)
 ```

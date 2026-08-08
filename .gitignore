@@ -10,4 +10,5 @@ coverage/
 # seen-ids.json is append-only run state; content-items.json is overwritten output.
 # Neither belongs in version control.
 data/*.json
+data/*.jsonl
 !data/.gitkeep

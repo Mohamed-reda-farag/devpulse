@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, appendFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { fetchClaudeCode } from '../lib/sources/claudeCode.js';
@@ -7,12 +7,6 @@ import { fetchCodex } from '../lib/sources/codex.js';
 import { fetchDevTools, devToolsItemUrl } from '../lib/sources/devTools.js';
 import { fetchOpenModels, openModelsItemUrl } from '../lib/sources/openModels.js';
 import { fetchHackathons } from '../lib/sources/hackathons.js';
-// company_internships is temporarily disabled by project-owner decision
-// (2026-08-07): Wuzzuf's endpoint now 404s, and the ITIDA/ITI scraper
-// selectors were never verified against live markup. The fetcher/normalizer
-// are left importable below (commented) so re-enabling is a one-line change
-// once the real endpoints are confirmed.
-// import { fetchCompanyInternships } from '../lib/sources/companyInternships.js';
 
 import {
   normalizeClaudeCode,
@@ -21,7 +15,6 @@ import {
   normalizeOpenModels,
   normalizeHackathons,
   idFromUrl,
-  // normalizeCompanyInternships, // see companyInternships import note above
 } from '../lib/normalize.js';
 import { claudeCodeEntryUrl } from '../lib/sources/claudeCode.js';
 import { codexEntryUrl } from '../lib/sources/codex.js';
@@ -31,6 +24,13 @@ import { logSourceFailure } from '../lib/logger.js';
 import type { ContentItem, SourceFailure } from '../lib/types.js';
 
 const CONTENT_ITEMS_PATH = 'data/content-items.json';
+// Append-only, one JSON object per line, across every run — NOT part of the
+// original Article V/plan.md contract (content-items.json is deliberately
+// per-run-only, since Phase 2's database becomes the real historical record).
+// This exists purely so a human can review everything found across multiple
+// manual `npm run ingest` invocations during Phase 1, since content-items.json
+// gets overwritten (often to an empty array) on every single run.
+const HISTORY_PATH = 'data/content-items-history.jsonl';
 
 export interface IngestResult {
   newItems: ContentItem[];
@@ -41,7 +41,8 @@ export interface IngestResult {
 /**
  * One entry per source, each isolated in its own try/catch. FR-004: if any
  * single source's fetcher throws outright (a bug, not just a handled
- * fetch/validation error), the other five must still produce results.
+ * fetch/validation error), the other four (of five active sources) must
+ * still produce results.
  *
  * Critical fix (2026-08-07): raw items are filtered against `seenIds` BEFORE
  * `normalizer` runs, not after. normalize.ts is where the expensive
@@ -91,7 +92,6 @@ export async function runIngest(): Promise<IngestResult> {
       (items) => normalizeHackathons(items),
       seenIds,
     ),
-    // runSource('company_internships', fetchCompanyInternships, ..., normalizeCompanyInternships, seenIds),
   ]);
 
   const candidates = results.flatMap((r) => r.items);
@@ -105,6 +105,10 @@ export async function runIngest(): Promise<IngestResult> {
 
   await mkdir(dirname(CONTENT_ITEMS_PATH), { recursive: true });
   await writeFile(CONTENT_ITEMS_PATH, JSON.stringify(newItems, null, 2), 'utf-8');
+  if (newItems.length > 0) {
+    const lines = newItems.map((item) => JSON.stringify(item)).join('\n') + '\n';
+    await appendFile(HISTORY_PATH, lines, 'utf-8');
+  }
   await appendSeenIds(newItems.map((i) => i.id));
 
   return { newItems, alreadySeenCount: alreadySeen.length, failures };
@@ -117,6 +121,10 @@ if (isMainModule) {
       console.log(
         `\nIngest complete: ${result.newItems.length} new item(s), ` +
           `${result.alreadySeenCount} already seen, ${result.failures.length} source failure(s).`,
+      );
+      console.log(
+        `data/content-items.json reflects THIS run only (${result.newItems.length} item(s)) — ` +
+          `see data/content-items-history.jsonl for everything found across all runs.`,
       );
       if (result.failures.length > 0) {
         console.log('Failures:');

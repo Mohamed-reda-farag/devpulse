@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 /**
- * Ten schemas for ten distinct raw-payload shapes (constitution Article III.11).
+ * Seven schemas for seven distinct raw-payload shapes (constitution Article III.11).
  * Two topics merge multiple independently-shaped sub-sources, which is why there
  * are more schemas than topics: devTools (OSSInsight + Hacker News), openModels
- * (Artificial Analysis + LLM Stats), companyInternships (ITIDA + ITI + Wuzzuf).
+ * (Artificial Analysis + LLM Stats).
  *
  * A schema failure here must be logged as `source_contract_changed`
  * (see lib/logger.ts), never folded into a generic fetch-error.
@@ -171,39 +171,3 @@ export const hackathonsSchema = z
   .passthrough();
 export type DevpostHackathon = z.infer<typeof devpostHackathonSchema>;
 
-// ---------------------------------------------------------------------------
-// company_internships sub-source 1 — ITIDA (no public API; scraped)
-// Validates the structured intermediate shape produced by the scraper, not
-// raw HTML — see lib/sources/companyInternships.ts.
-// ---------------------------------------------------------------------------
-export const itidaSchema = z.object({
-  title_ar: z.string().min(1),
-  url: z.string().min(1),
-  deadline_ar: z.string().nullable().optional(),
-  description_ar: z.string().nullable().optional(),
-});
-export type ItidaListing = z.infer<typeof itidaSchema>;
-
-// ---------------------------------------------------------------------------
-// company_internships sub-source 2 — ITI Summer Code Camp (no public API; scraped)
-// ---------------------------------------------------------------------------
-export const itiSchema = z.object({
-  program_title_ar: z.string().min(1),
-  link: z.string().min(1),
-  announcement_date_ar: z.string().nullable().optional(),
-  details_ar: z.string().nullable().optional(),
-});
-export type ItiListing = z.infer<typeof itiSchema>;
-
-// ---------------------------------------------------------------------------
-// company_internships sub-source 3 — Wuzzuf (no public API; scraped, ToS
-// unreviewed — flagged for Phase 7, see plan.md)
-// ---------------------------------------------------------------------------
-export const wuzzufSchema = z.object({
-  job_title_ar: z.string().min(1),
-  job_url: z.string().min(1),
-  company_ar: z.string().nullable().optional(),
-  posted_ar: z.string().nullable().optional(),
-  job_description_ar: z.string().nullable().optional(),
-});
-export type WuzzufListing = z.infer<typeof wuzzufSchema>;

@@ -117,7 +117,7 @@ async function fetchHackerNews(): Promise<SourceResult<DevToolsRawItem>> {
 
 /**
  * Fetches both dev_tools sub-sources independently — one failing must not
- * drop the other (same pattern as company_internships' three sub-sources).
+ * drop the other (same isolation pattern used across all multi-sub-source topics).
  */
 export async function fetchDevTools(): Promise<SourceResult<DevToolsRawItem>> {
   const [ossinsight, hackernews] = await Promise.all([fetchOssInsight(), fetchHackerNews()]);
