@@ -31,6 +31,15 @@ vi.mock('../lib/dedupe.js', async () => {
   const actual = await vi.importActual<typeof import('../lib/dedupe.js')>('../lib/dedupe.js');
   return { ...actual, loadExistingIds: vi.fn(), insertNewItems: vi.fn() };
 });
+// normalize.ts itself (title truncation, id derivation, etc.) is real and
+// unmocked — only its one network-touching dependency, Groq, is stubbed.
+// Without this, claude_code/codex/dev_tools normalization silently fails
+// (caught by normalize.ts's own per-item try/catch) whenever GROQ_API_KEY
+// isn't set or api.groq.com isn't reachable — exactly the live-network
+// dependency Article VI forbids in the automated suite.
+vi.mock('../lib/groqClient.js', () => ({
+  summarize: vi.fn().mockResolvedValue('mocked summary'),
+}));
 
 import { fetchClaudeCode } from '../lib/sources/claudeCode.js';
 import { fetchCodex } from '../lib/sources/codex.js';

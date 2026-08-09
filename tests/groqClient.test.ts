@@ -56,3 +56,25 @@ describe('groqClient — retries on 429 instead of failing immediately', () => {
     expect((result as Error).message).toContain('429');
   });
 });
+
+describe('groqClient — caps backoff even when Groq suggests a much longer wait', () => {
+  it('does not honor a multi-minute retry-after literally (daily RPD/TPD quota case)', async () => {
+    // 371s ("6m 11s") mirrors Groq's own docs example for a daily-quota 429 —
+    // long compared to the few-second waits a per-minute limit produces.
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(429, {}, { 'retry-after': '371' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { summarize } = await import('../lib/groqClient.js');
+    const promise = summarize('some raw text', 'Test Source').catch((e: Error) => e);
+
+    // Uncapped, exhausting retries here would take ~4 * 371s ≈ 25 minutes.
+    // With the MAX_BACKOFF_MS cap, all 4 attempts (1 + 3 retries) should
+    // finish well within 3 minutes of fake time instead.
+    await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+
+    const result = await promise;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('429');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});

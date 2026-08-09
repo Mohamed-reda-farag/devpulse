@@ -24,6 +24,23 @@ Phases 3–4. See each phase's `spec.md`, `plan.md`, and `tasks.md` for its exac
 > entries per run; `groqClient.ts` paces calls and retries on 429; and a `content-items-history.jsonl`
 > file was added since `content-items.json` is overwritten every run (by design) and was mistaken
 > for a bug when it went empty after a run with zero new items.
+>
+> **Status (2026-08-09):** Phase 2's first real `npm run ingest` against Supabase (an empty
+> `content_items` table, so every historical item across all five sources counted as "new" in one
+> run, not the small incremental batches later runs will see) burned through Groq's **daily** token
+> budget for `llama-3.3-70b-versatile` — 100K TPD on the free tier — well before its per-minute
+> limit, which is the only figure constitution.md Article II had tracked. Confirmed via Groq's own
+> usage dashboard (console.groq.com/settings/limits), not guesswork; no real billing impact (Free
+> plan, `$0`, confirmed in Billing). Two fixes: `groqClient.ts` now caps how long it will honor a
+> 429's `retry-after` at 30s (`MAX_BACKOFF_MS`) — a multi-minute `retry-after` signals the *daily*
+> quota, which can't recover mid-run no matter how long one item's retry loop waits, and the old
+> unbounded wait let a single item block the whole per-source sequential loop for many minutes;
+> and `dev_tools` (`lib/sources/devTools.ts`) had no volume cap at all before this — both its
+> sub-sources (OSSInsight, Hacker News) are now capped at 15 items each per run
+> (`MAX_ITEMS_PER_SUBSOURCE`), matching `claude_code`/`codex`'s existing cap. Also decided (not yet
+> implemented — Phase 4 builds the actual scheduler): once scheduled, `npm run ingest` will run
+> **daily**, decoupled from the 3-day **digest** cadence in Article I — same total volume either
+> way, but spread across more resets of the daily quota instead of concentrated into one run.
 
 ## Phase 1: Content Ingestion Pipeline
 

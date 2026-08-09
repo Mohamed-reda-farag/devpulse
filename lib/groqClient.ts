@@ -7,6 +7,16 @@ const MODEL = 'llama-3.3-70b-versatile';
 // every 2.2s keeps us under the limit with margin.
 const MIN_INTERVAL_MS = 2200;
 const MAX_RETRIES = 3;
+// Never sleep longer than this for a single retry, even if Groq's
+// retry-after header says more. A large retry-after almost always means the
+// DAILY (RPD/TPD) quota was hit, not the per-minute one — that won't reset
+// mid-run no matter how long we wait, so honoring it literally just blocks
+// this item (and everything sequential after it in normalize.ts's per-source
+// loop) for however long the header says, sometimes many minutes. Capping
+// bounds one item's worst case to MAX_RETRIES * MAX_BACKOFF_MS (~90s); if
+// the quota genuinely hasn't recovered by then, the item is skipped via the
+// existing per-item try/catch in normalize.ts, same as any other failure.
+const MAX_BACKOFF_MS = 30_000;
 
 let lastCallAt = 0;
 
@@ -52,10 +62,12 @@ async function callGroq(systemPrompt: string, userContent: string): Promise<stri
 
     if (res.status === 429) {
       // Respect Retry-After when Groq sends one; otherwise back off
-      // exponentially (2s, 4s, 8s) on top of the base throttle interval.
+      // exponentially (2s, 4s, 8s) on top of the base throttle interval —
+      // but never beyond MAX_BACKOFF_MS (see comment above).
       const retryAfterHeader = res.headers.get('retry-after');
       const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : NaN;
-      const backoffMs = Number.isFinite(retryAfterMs) ? retryAfterMs : 2 ** (attempt + 1) * 1000;
+      const suggestedMs = Number.isFinite(retryAfterMs) ? retryAfterMs : 2 ** (attempt + 1) * 1000;
+      const backoffMs = Math.min(suggestedMs, MAX_BACKOFF_MS);
       lastError = new Error(`Groq API error: HTTP 429 Too Many Requests`);
       if (attempt < MAX_RETRIES) {
         await sleep(backoffMs);

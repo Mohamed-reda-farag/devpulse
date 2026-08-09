@@ -11,6 +11,13 @@ const OSSINSIGHT_URL = 'https://api.ossinsight.io/v1/trends/repos/?period=past_2
 const HN_TOP_STORIES_URL = 'https://hacker-news.firebaseio.com/v0/topstories.json';
 const HN_ITEM_URL = (id: number) => `https://hacker-news.firebaseio.com/v0/item/${id}.json`;
 const HN_STORIES_TO_CHECK = 30;
+// dev_tools previously had no volume cap at all, unlike claude_code/codex's
+// existing 15-most-recent-entries limit (README). A cold-start run against
+// full history (empty content_items) exposed this: dev_tools was a major
+// contributor to burning through Groq's *daily* token budget (100K TPD for
+// llama-3.3-70b-versatile — see README status note). Capped here to match
+// the same per-run budget claude_code/codex already respect.
+export const MAX_ITEMS_PER_SUBSOURCE = 15;
 
 export const OSSINSIGHT_SOURCE_NAME = 'OSSInsight trending repositories';
 export const HN_SOURCE_NAME = 'Hacker News';
@@ -50,7 +57,9 @@ async function fetchOssInsight(): Promise<SourceResult<DevToolsRawItem>> {
       };
     }
     return {
-      items: validation.data.data.rows.map((row) => ({ kind: 'ossinsight' as const, row })),
+      items: validation.data.data.rows
+        .slice(0, MAX_ITEMS_PER_SUBSOURCE)
+        .map((row) => ({ kind: 'ossinsight' as const, row })),
       failures: [],
     };
   } catch (err) {
@@ -78,6 +87,7 @@ async function fetchHackerNews(): Promise<SourceResult<DevToolsRawItem>> {
     const failures: SourceFailure[] = [];
 
     for (const id of ids) {
+      if (items.length >= MAX_ITEMS_PER_SUBSOURCE) break; // cap reached — skip remaining stories this run
       try {
         const itemRes = await fetch(HN_ITEM_URL(id));
         if (!itemRes.ok) throw new Error(`HTTP ${itemRes.status}`);

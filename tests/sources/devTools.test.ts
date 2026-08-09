@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fetchDevTools } from '../../lib/sources/devTools.js';
+import { fetchDevTools, MAX_ITEMS_PER_SUBSOURCE } from '../../lib/sources/devTools.js';
 
 const OSSINSIGHT_RESPONSE = {
   type: 'sql_endpoint',
@@ -137,5 +137,76 @@ describe('fetchDevTools', () => {
     const result = await fetchDevTools();
     const ossFailure = result.failures.find((f) => f.source === 'dev_tools:ossinsight');
     expect(ossFailure?.kind).toBe('source_contract_changed');
+  });
+
+  it(`caps OSSInsight rows at ${MAX_ITEMS_PER_SUBSOURCE} even when the API returns more`, async () => {
+    const manyRows = Array.from({ length: MAX_ITEMS_PER_SUBSOURCE + 10 }, (_, i) => ({
+      repo_id: i,
+      repo_name: `someorg/repo-${i}`,
+      description: 'A repo.',
+      language: 'Rust',
+      stars: '100',
+      forks: '10',
+    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url.startsWith('https://api.ossinsight.io')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            json: async () => ({ ...OSSINSIGHT_RESPONSE, data: { ...OSSINSIGHT_RESPONSE.data, rows: manyRows } }),
+          });
+        }
+        return mockFetchImpl(url);
+      }),
+    );
+
+    const result = await fetchDevTools();
+    const ossinsightItems = result.items.filter((i) => i.kind === 'ossinsight');
+    expect(ossinsightItems).toHaveLength(MAX_ITEMS_PER_SUBSOURCE);
+  });
+
+  it(`caps Hacker News matches at ${MAX_ITEMS_PER_SUBSOURCE} and stops checking further stories once reached`, async () => {
+    // 20 story ids, every one a "story" whose title matches the dev-tool
+    // keyword regex — more than enough to exceed the cap if it weren't there.
+    const manyIds = Array.from({ length: 20 }, (_, i) => i + 1);
+    const manyItems: Record<number, unknown> = Object.fromEntries(
+      manyIds.map((id) => [
+        id,
+        { id, type: 'story', title: `A new open source CLI tool #${id}`, url: `https://example.com/${id}`, by: 'u', time: 1750000000 + id, score: 10 },
+      ]),
+    );
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.startsWith('https://api.ossinsight.io')) {
+        return Promise.resolve({ ok: true, status: 200, statusText: 'OK', json: async () => OSSINSIGHT_RESPONSE });
+      }
+      if (url.includes('topstories.json')) {
+        return Promise.resolve({ ok: true, status: 200, statusText: 'OK', json: async () => manyIds });
+      }
+      const match = /item\/(\d+)\.json/.exec(url);
+      if (match?.[1]) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => manyItems[Number(match[1])],
+        });
+      }
+      throw new Error(`Unexpected URL in test: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchDevTools();
+    const hnItems = result.items.filter((i) => i.kind === 'hackernews');
+    expect(hnItems).toHaveLength(MAX_ITEMS_PER_SUBSOURCE);
+
+    // Early-exit check: once the cap is reached, remaining stories shouldn't
+    // even be fetched. Total HN item-fetch calls = 1 (topstories) + exactly
+    // MAX_ITEMS_PER_SUBSOURCE (one per story up to the cap), regardless of
+    // the 20 ids available.
+    const itemFetchCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes('/item/'));
+    expect(itemFetchCalls).toHaveLength(MAX_ITEMS_PER_SUBSOURCE);
   });
 });
