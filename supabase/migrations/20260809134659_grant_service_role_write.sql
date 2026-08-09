@@ -1,0 +1,15 @@
+-- Bugfix for the initial migration: service_role was never explicitly granted
+-- select/insert on topics/content_items. This project has "Automatically
+-- expose new tables" disabled (Supabase's current default as of May 30, 2026),
+-- so the old assumption — that service_role gets full access to every public
+-- table automatically — no longer holds. BYPASSRLS (which service_role has by
+-- default) only bypasses Row Level Security policies; it does not substitute
+-- for a base Postgres GRANT. Without this, scripts/ingest.ts's dedupe query
+-- and insert both fail with "permission denied for table content_items".
+--
+-- Least privilege: only select + insert, matching what the pipeline actually
+-- does (lib/dedupe.ts: loadExistingIds selects, insertNewItems inserts —
+-- neither updates nor deletes existing rows, per Phase 2's first-seen-wins
+-- design). A future phase that needs update/delete should grant that
+-- explicitly in its own migration, not assume it's already covered here.
+grant select, insert on topics, content_items to service_role;
