@@ -1,14 +1,10 @@
 node_modules/
-.env.local
-.env*.local
-.env
 dist/
 coverage/
 .next/
 
-# Phase-1-only exception to Article IV — deleted once Phase 2's Supabase writer lands.
-# seen-ids.json is append-only run state; content-items.json is overwritten output.
-# Neither belongs in version control.
-data/*.json
-data/*.jsonl
-!data/.gitkeep
+# dotenvx
+.env
+.env.keys
+.env.local
+.env.*.local
