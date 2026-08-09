@@ -3,9 +3,10 @@
 A personalized, 3-day developer digest across five topics: `claude_code`, `codex`, `dev_tools`,
 `open_models`, and `hackathons`.
 
-**This repository currently implements Phase 1 only** — the content ingestion pipeline. There is
-no database, no web app, and no scheduling yet; those land in Phases 2–4. See `spec.md`, `plan.md`,
-and `tasks.md` for this phase's exact scope, and `constitution.md` for the rules every phase follows.
+**This repository currently implements Phases 1–2** — content ingestion plus persistence to a
+shared Supabase database. There is no web app, no auth, and no scheduling yet; those land in
+Phases 3–4. See each phase's `spec.md`, `plan.md`, and `tasks.md` for its exact scope, and
+`constitution.md` for the rules every phase follows.
 
 > **Status (2026-08-08):** `company_internships` (ITIDA/ITI/Wuzzuf) has been **fully removed** by
 > explicit project-owner decision — not disabled, deleted: the source module, its Zod schemas, its
@@ -33,14 +34,15 @@ JSON file for manual inspection. Runnable with one command; no scheduling, no pe
 ### Prerequisites
 
 - Node.js >= 20
-- Three free-tier API keys (see below)
+- Six free-tier credentials (see below): three API keys carried over from Phase 1, plus a
+  Supabase project's URL and two of its keys, added in Phase 2
 
 ### Setup
 
 ```bash
 npm install
-cp .env.example .env.local
-# then fill in the three keys below in .env.local
+cp .env.example .env
+# then fill in all six keys below in .env
 ```
 
 ### Required environment variables
@@ -50,9 +52,18 @@ cp .env.example .env.local
 | `GROQ_API_KEY` | Summarizing `claude_code`, `codex`, `dev_tools` (`llama-3.3-70b-versatile`, free tier) | https://console.groq.com |
 | `ARTIFICIAL_ANALYSIS_API_KEY` | One of `open_models`'s two sub-sources | https://artificialanalysis.ai/insights |
 | `LLM_STATS_API_KEY` | The other `open_models` sub-source | https://llm-stats.com/developer |
+| `SUPABASE_URL` | The pipeline's Supabase project URL | Supabase project → Settings → API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Bypasses Row Level Security — server-side only (Article III.2). The single most sensitive credential in this project so far | Supabase project → Settings → API |
+| `SUPABASE_ANON_KEY` | Manual RLS verification only — never imported by any script | Supabase project → Settings → API |
 
-No secret is ever written into source code — all three live only in `.env.local` (gitignored) or,
+No secret is ever written into source code — all six live only in `.env` (gitignored) or,
 in CI/production, GitHub Actions secrets / Vercel env vars (constitution Article III.1).
+
+### Database schema
+
+Defined in version-controlled migration files under `/supabase/migrations` (constitution Article
+IV) — never created or edited by hand through the Supabase dashboard. Apply with `supabase db push`
+(or equivalent) against your project before running `npm run ingest` for the first time.
 
 ### Run it
 
@@ -60,21 +71,20 @@ in CI/production, GitHub Actions secrets / Vercel env vars (constitution Article
 npm run ingest
 ```
 
-This writes:
-- **`data/content-items.json`** — the new items from *this* run only (overwritten every run; not
-  a cumulative history — Phase 2's database becomes the historical record). **This means running
-  `npm run ingest` twice in a row typically leaves this file empty** (nothing new on the second
-  run) — that's expected, not a bug, but it's easy to mistake for one if you check the file after
-  more than one run.
-- **`data/content-items-history.jsonl`** — every item found across *all* runs, one JSON object per
-  line, never overwritten. Not part of the original Article V contract; added purely so a human
-  can review what's been found without racing the per-run overwrite above. Check this file, not
-  `content-items.json`, if you want to see everything the pipeline has produced so far.
-- **`data/seen-ids.json`** — an append-only index of every item id ever produced, used to decide
-  "is this new?" on the next run. Never overwritten, only grown.
+This inserts every genuinely new item straight into Supabase's `content_items` table, in the same
+`ContentItem` shape defined in the constitution (Article V). There's no local `data/*.json` file to
+check anymore (Phase 1's `data/` exception to Article IV's fixed folder structure was retired in
+Phase 2) — query the table directly, via the Supabase dashboard or a plain
+`select * from content_items`, to see everything the pipeline has produced so far.
 
-`data/` is a deliberate, time-boxed exception to Article IV's fixed folder structure, scoped to
-this phase only — all three files disappear once Phase 2 replaces them with Supabase tables.
+Deciding "is this new?" now happens against the database (`content_items.id`) instead of a local
+`seen-ids.json` file — same first-seen-wins behavior as Phase 1, different source of truth. Running
+`npm run ingest` twice in a row with no real-world changes at the sources still inserts zero new
+rows the second time — expected, not a bug, same as Phase 1's SC-002.
+
+If Supabase itself is unreachable — not a single source failing, but the connection to the database
+— the script logs a distinct `database_unreachable` error and exits non-zero, rather than silently
+"succeeding" while persisting nothing.
 
 Console output after a run summarizes how many new items were found, how many were already seen,
 and lists any source failures with their kind (`fetch_error` vs `source_contract_changed`) and
@@ -89,21 +99,37 @@ npm run lint
 npm run build    # tsc --noEmit
 ```
 
-All source-fetcher and normalization tests run against static mocked fixtures — **no live network
-calls happen in the automated suite** (constitution Article VI). 39 tests currently pass across 9
-files, covering dedupe logic, all five source fetchers (including sub-source isolation and the
-distinct `source_contract_changed` failure mode), the normalize layer's Groq usage boundaries, and
-the orchestrator's per-source failure isolation and dedupe-before-normalize ordering.
+All source-fetcher, normalization, and dedupe/persistence tests run against static mocked fixtures
+or a mocked Supabase client — **no live network calls happen in the automated suite** (constitution
+Article VI). This covers dedupe/insert logic against `content_items` (a genuinely-new id, an
+already-present id, a mixed batch, and a mocked connection failure), all five source fetchers
+(including sub-source isolation and the distinct `source_contract_changed` failure mode), the
+normalize layer's Groq usage boundaries, and the orchestrator's per-source failure isolation,
+dedupe-before-normalize ordering, and the distinct `database_unreachable` failure path.
+
+What the automated suite deliberately does **not** cover: whether the real migration SQL under
+`/supabase/migrations` is syntactically correct and actually produces the schema and RLS behavior
+described above — mocking the Supabase client (required by Article VI) means the migration itself
+is never executed by the test suite. This is closed by a manual check instead (applying the
+migration to a real Supabase project and confirming it in the dashboard) — see each phase's
+`tasks.md` for the exact Manual Actions checklist.
 
 ### What's verified vs. what needs your local run
 
-All five sources have been run against the real internet with real keys and confirmed working
+Phase 1's five sources were run against the real internet with real keys and confirmed working
 (project owner, 2026-08-08): a full `npm run ingest` produced items from all five with zero source
 failures, and a second consecutive run correctly produced zero new items (SC-002). `hackathons`
-specifically was confirmed via a real item found in `data/content-items-history.jsonl` — which is
-also how a real data-quality bug was caught: Devpost's `prize_amount` field arrives with raw HTML
-embedded in it (e.g. `"$<span data-currency-value>0</span>"`), not clean text. Fixed in
-`lib/sources/hackathons.ts` (`stripHtml()`), with a regression test using the exact real payload.
+specifically was confirmed via a real item, which is also how a real data-quality bug was caught:
+Devpost's `prize_amount` field arrives with raw HTML embedded in it (e.g.
+`"$<span data-currency-value>0</span>"`), not clean text. Fixed in `lib/sources/hackathons.ts`
+(`stripHtml()`), with a regression test using the exact real payload.
+
+Phase 1's local run-state files (`data/seen-ids.json`, `data/content-items-history.jsonl`,
+`data/content-items.json`) were deliberately deleted by the project owner before Phase 2 began, so
+there was no historical data to migrate into Supabase — `content_items` starts empty and becomes
+the system of record from Phase 2's real launch onward. What Phase 2 itself needs verified against
+a real Supabase project (schema applied, RLS actually enforced, a real double-run of
+`npm run ingest`) is tracked in `phase2_tasks.md`'s Manual Actions section, not here.
 
 ## Project structure
 
@@ -115,13 +141,16 @@ embedded in it (e.g. `"$<span data-currency-value>0</span>"`), not clean text. F
   groqClient.ts         Groq API wrapper (mockable, rate-limited, retries on 429)
   parseChangelog.ts    Shared markdown changelog parser
   normalize.ts          Converts every source's raw output into ContentItem
-  dedupe.ts              Checks candidates against data/seen-ids.json
+  dedupe.ts              Checks candidates against content_items (Supabase), batches inserts
+  /db
+    supabaseClient.ts    Server-side Supabase client — service role, never client-side (Article III.2)
   /sources
     claudeCode.ts codex.ts devTools.ts openModels.ts hackathons.ts
 /scripts
   ingest.ts             Orchestrates all five sources with per-source isolation
+/supabase
+  /migrations           Version-controlled schema + RLS policies (Article IV)
 /tests
   dedupe.test.ts normalize.test.ts ingest.test.ts groqClient.test.ts
   /sources  (one test file per topic)
-/data                  Phase-1-only run state (gitignored)
 ```

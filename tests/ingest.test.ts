@@ -1,156 +1,155 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { rm } from 'node:fs/promises';
 
-vi.mock('../lib/sources/claudeCode.js', () => ({
-  fetchClaudeCode: vi.fn(),
-  claudeCodeEntryUrl: vi.fn((entry: { version: string }) => `https://example.com/claude_code/${entry.version}`),
-}));
-vi.mock('../lib/sources/codex.js', () => ({
-  fetchCodex: vi.fn(),
-  codexEntryUrl: vi.fn((entry: { version: string }) => `https://example.com/codex/${entry.version}`),
-}));
-vi.mock('../lib/sources/devTools.js', () => ({
-  fetchDevTools: vi.fn(),
-  devToolsItemUrl: vi.fn(() => 'https://example.com/dev_tools'),
-}));
-vi.mock('../lib/sources/openModels.js', () => ({
-  fetchOpenModels: vi.fn(),
-  openModelsItemUrl: vi.fn(() => 'https://example.com/open_models'),
-}));
-vi.mock('../lib/sources/hackathons.js', () => ({
-  fetchHackathons: vi.fn(),
-}));
-
-vi.mock('../lib/normalize.js', () => ({
-  normalizeClaudeCode: vi.fn(async (items: unknown[]) => items),
-  normalizeCodex: vi.fn(async (items: unknown[]) => items),
-  normalizeDevTools: vi.fn(async (items: unknown[]) => items),
-  normalizeOpenModels: vi.fn((items: unknown[]) => items),
-  normalizeHackathons: vi.fn((items: unknown[]) => items),
-  idFromUrl: vi.fn((url: string) => url),
-}));
-
-vi.mock('../lib/dedupe.js', () => ({
-  loadSeenIds: vi.fn(async () => new Set()),
-  partitionNewItems: vi.fn((candidates: unknown[]) => ({ newItems: candidates, alreadySeen: [] })),
-  appendSeenIds: vi.fn(async () => undefined),
-}));
+vi.mock('../lib/sources/claudeCode.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../lib/sources/claudeCode.js')>('../lib/sources/claudeCode.js');
+  return { ...actual, fetchClaudeCode: vi.fn() };
+});
+vi.mock('../lib/sources/codex.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/sources/codex.js')>('../lib/sources/codex.js');
+  return { ...actual, fetchCodex: vi.fn() };
+});
+vi.mock('../lib/sources/devTools.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../lib/sources/devTools.js')>('../lib/sources/devTools.js');
+  return { ...actual, fetchDevTools: vi.fn() };
+});
+vi.mock('../lib/sources/openModels.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../lib/sources/openModels.js')>('../lib/sources/openModels.js');
+  return { ...actual, fetchOpenModels: vi.fn() };
+});
+vi.mock('../lib/sources/hackathons.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../lib/sources/hackathons.js')>('../lib/sources/hackathons.js');
+  return { ...actual, fetchHackathons: vi.fn() };
+});
+// Only the Supabase-facing I/O boundary is mocked — partitionNewItems (pure
+// logic) comes through untouched via importActual, so these tests exercise
+// the real dedupe decision, not a stand-in for it.
+vi.mock('../lib/dedupe.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/dedupe.js')>('../lib/dedupe.js');
+  return { ...actual, loadExistingIds: vi.fn(), insertNewItems: vi.fn() };
+});
 
 import { fetchClaudeCode } from '../lib/sources/claudeCode.js';
 import { fetchCodex } from '../lib/sources/codex.js';
 import { fetchDevTools } from '../lib/sources/devTools.js';
 import { fetchOpenModels } from '../lib/sources/openModels.js';
 import { fetchHackathons } from '../lib/sources/hackathons.js';
-import { loadSeenIds } from '../lib/dedupe.js';
-import { normalizeCodex } from '../lib/normalize.js';
-
-// This fixture must satisfy several structurally different raw-item types across the mocked
-// fetchers below, so a concrete type isn't practical here.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function fakeItem(tag: string): any {
-  return {
-    id: `id-${tag}`,
-    topic: tag,
-    title: tag,
-    summary: tag,
-    source_name: tag,
-    source_url: `https://example.com/${tag}`,
-    published_at: '2026-07-30T00:00:00.000Z',
-    fetched_at: '2026-07-30T00:00:00.000Z',
-  };
-}
+import { loadExistingIds, insertNewItems } from '../lib/dedupe.js';
+import { claudeCodeEntryUrl } from '../lib/sources/claudeCode.js';
+import { idFromUrl } from '../lib/normalize.js';
+import { runIngest, main } from '../scripts/ingest.js';
 
 beforeEach(() => {
-  vi.mocked(fetchClaudeCode).mockRejectedValue(new Error('unexpected crash in claude_code fetcher'));
-  vi.mocked(fetchCodex).mockResolvedValue({ items: [fakeItem('codex')], failures: [] });
-  vi.mocked(fetchDevTools).mockResolvedValue({ items: [fakeItem('dev_tools')], failures: [] });
-  vi.mocked(fetchOpenModels).mockResolvedValue({ items: [fakeItem('open_models')], failures: [] });
-  vi.mocked(fetchHackathons).mockResolvedValue({ items: [fakeItem('hackathons')], failures: [] });
+  vi.clearAllMocks();
+  vi.mocked(fetchClaudeCode).mockResolvedValue({ items: [], failures: [] });
+  vi.mocked(fetchCodex).mockResolvedValue({ items: [], failures: [] });
+  vi.mocked(fetchDevTools).mockResolvedValue({ items: [], failures: [] });
+  vi.mocked(fetchOpenModels).mockResolvedValue({ items: [], failures: [] });
+  vi.mocked(fetchHackathons).mockResolvedValue({ items: [], failures: [] });
+  vi.mocked(loadExistingIds).mockResolvedValue(new Set());
+  vi.mocked(insertNewItems).mockResolvedValue(undefined);
+  process.exitCode = 0;
 });
 
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks();
-  await rm('data/content-items.json', { force: true });
-  await rm('data/content-items-history.jsonl', { force: true });
+  process.exitCode = 0;
 });
 
-describe('runIngest — per-source isolation (FR-004)', () => {
-  it('returns results from the other four sources when one fetcher throws, with a failure entry naming it', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    const { runIngest } = await import('../scripts/ingest.js');
-    const result = await runIngest();
-
-    expect(result.newItems).toHaveLength(4);
-    expect(result.newItems.map((i) => i.topic).sort()).toEqual(
-      ['codex', 'dev_tools', 'hackathons', 'open_models'].sort(),
-    );
-
-    expect(result.failures).toHaveLength(1);
-    expect(result.failures[0]?.source).toBe('claude_code');
-    expect(result.failures[0]?.kind).toBe('fetch_error');
-    expect(result.failures[0]?.reason).toContain('unexpected crash in claude_code fetcher');
-
-    // A clear log entry identifying the failed source was produced (SC-003).
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('claude_code'));
-
-    consoleErrorSpy.mockRestore();
-  });
-});
-
-describe('runIngest — dedupe happens BEFORE the expensive normalize/Groq step (regression, 2026-08-07)', () => {
-  it('filters out already-seen raw items before calling normalize, not after', async () => {
-    // Real production bug: normalize (which calls Groq) used to run on every
-    // raw item every time, with dedupe only applied afterward — so a
-    // steady-state run still re-summarized hundreds of already-seen
-    // changelog entries and blew through Groq's rate limit. normalize must
-    // only ever see genuinely new items.
-    const seenUrl = 'https://example.com/codex/v1-old';
-    vi.mocked(loadSeenIds).mockResolvedValue(new Set([seenUrl]));
-
-    vi.mocked(fetchClaudeCode).mockResolvedValue({ items: [], failures: [] });
-    vi.mocked(fetchCodex).mockResolvedValue({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      items: [{ version: 'v1-old' }, { version: 'v2-new' }] as any,
+describe('runIngest', () => {
+  it('only passes genuinely-new items to insertNewItems, filtering out ones already in existingIds', async () => {
+    const seenUrl = claudeCodeEntryUrl({ version: 'v1', body: 'body1' });
+    const seenId = idFromUrl(seenUrl);
+    vi.mocked(loadExistingIds).mockResolvedValue(new Set([seenId]));
+    vi.mocked(fetchClaudeCode).mockResolvedValue({
+      items: [
+        { version: 'v1', body: 'body1' },
+        { version: 'v2', body: 'body2' },
+      ],
       failures: [],
     });
-    vi.mocked(fetchDevTools).mockResolvedValue({ items: [], failures: [] });
-    vi.mocked(fetchOpenModels).mockResolvedValue({ items: [], failures: [] });
-    vi.mocked(fetchHackathons).mockResolvedValue({ items: [], failures: [] });
 
-    const { runIngest } = await import('../scripts/ingest.js');
-    await runIngest();
+    const result = await runIngest();
 
-    expect(normalizeCodex).toHaveBeenCalledWith([{ version: 'v2-new' }]);
+    expect(result.newItems.map((i) => i.title)).toEqual(['Claude Code v2']);
+    expect(insertNewItems).toHaveBeenCalledTimes(1);
+    const insertedItems = vi.mocked(insertNewItems).mock.calls[0][0];
+    expect(insertedItems.map((i) => i.title)).toEqual(['Claude Code v2']);
+  });
+
+  it('isolates a per-source fetch failure so the other sources still produce results (Phase 1 FR-004, unchanged)', async () => {
+    vi.mocked(fetchClaudeCode).mockRejectedValue(new Error('boom'));
+    vi.mocked(fetchCodex).mockResolvedValue({
+      items: [{ version: 'c1', body: 'codex body' }],
+      failures: [],
+    });
+
+    const result = await runIngest();
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ source: 'claude_code', kind: 'fetch_error' });
+    expect(result.newItems.some((i) => i.title === 'Codex c1')).toBe(true);
+  });
+
+  it('propagates a database_unreachable failure from loadExistingIds without catching it', async () => {
+    vi.mocked(loadExistingIds).mockRejectedValue(new Error('database_unreachable: connection refused'));
+    await expect(runIngest()).rejects.toThrow(/database_unreachable/);
+  });
+
+  it('propagates a database_unreachable failure from insertNewItems without catching it', async () => {
+    vi.mocked(insertNewItems).mockRejectedValue(new Error('database_unreachable: connection refused'));
+    vi.mocked(fetchClaudeCode).mockResolvedValue({
+      items: [{ version: 'v1', body: 'body1' }],
+      failures: [],
+    });
+    await expect(runIngest()).rejects.toThrow(/database_unreachable/);
   });
 });
 
-describe('runIngest — cross-run history file (fix for reported bug, 2026-08-08)', () => {
-  it('accumulates items across multiple runs in the history file, unlike content-items.json which is overwritten each run', async () => {
-    const { readFile } = await import('node:fs/promises');
+describe('main (CLI entry point)', () => {
+  it('logs a distinct database_unreachable message and sets a non-zero exit code when Supabase is unreachable', async () => {
+    vi.mocked(loadExistingIds).mockRejectedValue(new Error('database_unreachable: connection refused'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    vi.mocked(loadSeenIds).mockResolvedValue(new Set());
+    await main();
 
-    // Run 1: two sources succeed with one item each.
-    vi.mocked(fetchClaudeCode).mockResolvedValue({ items: [], failures: [] });
-    vi.mocked(fetchCodex).mockResolvedValue({ items: [], failures: [] });
-    vi.mocked(fetchDevTools).mockResolvedValue({ items: [fakeItem('dev_tools')], failures: [] });
-    vi.mocked(fetchOpenModels).mockResolvedValue({ items: [], failures: [] });
-    vi.mocked(fetchHackathons).mockResolvedValue({ items: [fakeItem('hackathons')], failures: [] });
+    expect(process.exitCode).toBe(1);
+    const loggedDatabaseUnreachable = errorSpy.mock.calls.some((call) =>
+      call.some((arg) => typeof arg === 'string' && arg.includes('database_unreachable')),
+    );
+    expect(loggedDatabaseUnreachable).toBe(true);
+  });
 
-    const { runIngest } = await import('../scripts/ingest.js');
-    await runIngest();
+  it('does not fold a database_unreachable failure into the per-source "Failures:" report', async () => {
+    vi.mocked(loadExistingIds).mockRejectedValue(new Error('database_unreachable: connection refused'));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // Run 2: nothing new (as if everything from run 1 is now already-seen) —
-    // content-items.json would go back to empty, but history must keep run 1's items.
-    vi.mocked(fetchDevTools).mockResolvedValue({ items: [], failures: [] });
-    vi.mocked(fetchHackathons).mockResolvedValue({ items: [], failures: [] });
-    await runIngest();
+    await main();
 
-    const historyRaw = await readFile('data/content-items-history.jsonl', 'utf-8');
-    const historyLines = historyRaw.trim().split('\n');
-    expect(historyLines).toHaveLength(2);
-    const topics = historyLines.map((line) => JSON.parse(line).topic).sort();
-    expect(topics).toEqual(['dev_tools', 'hackathons']);
+    // The per-source "Failures:" report is only ever printed after a
+    // successful runIngest() resolution — a database_unreachable rejection
+    // short-circuits before that point, so a source-failure-style line
+    // (e.g. "[fetch_error] ...") must never appear here.
+    const loggedAsSourceFailure = [...logSpy.mock.calls, ...errorSpy.mock.calls].some((call) =>
+      call.some((arg) => typeof arg === 'string' && arg.includes('[fetch_error]')),
+    );
+    expect(loggedAsSourceFailure).toBe(false);
+  });
+
+  it('exits 0 (unset) and reports normally on a successful run with per-source failures still listed', async () => {
+    vi.mocked(fetchClaudeCode).mockRejectedValue(new Error('boom'));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await main();
+
+    expect(process.exitCode).toBe(0);
+    const loggedSourceFailure = logSpy.mock.calls.some((call) =>
+      call.some((arg) => typeof arg === 'string' && arg.includes('[fetch_error] claude_code')),
+    );
+    expect(loggedSourceFailure).toBe(true);
   });
 });
