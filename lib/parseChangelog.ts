@@ -2,8 +2,11 @@ import type { ChangelogEntry } from './schemas.js';
 
 /**
  * Splits a "## <version>" style markdown changelog into per-version entries.
- * Both claude_code and codex publish this shape; the parsing itself is
- * independent of which source it came from.
+ * Used by claude_code's real CHANGELOG.md. codex.ts does NOT use this —
+ * codex's real changelog turned out to be a rendered docs page, not flat
+ * markdown (see codex.ts's own comment), so it parses HTML via cheerio
+ * instead. Kept general/source-agnostic in case a future source publishes
+ * this same flat-markdown shape.
  */
 export function parseMarkdownChangelog(markdown: string): ChangelogEntry[] {
   const lines = markdown.split('\n');

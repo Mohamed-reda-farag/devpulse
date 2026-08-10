@@ -82,4 +82,40 @@ describe('fetchClaudeCode', () => {
     expect(result.failures).toEqual([]);
     expect(result.items.length).toBeLessThanOrEqual(15);
   });
+
+  it('truncates a single entry body at 900 chars, matching codex.ts\'s existing cap', async () => {
+    const longBody = 'x'.repeat(5000);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => `# Changelog\n\n## 2.1.225\n${longBody}\n`,
+      }),
+    );
+
+    const result = await fetchClaudeCode();
+    expect(result.failures).toEqual([]);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.body.length).toBeLessThanOrEqual(900);
+  });
+
+  it('leaves a short entry body untouched (well under the 900-char cap)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => SAMPLE_CHANGELOG,
+      }),
+    );
+
+    const result = await fetchClaudeCode();
+    expect(result.items[0]?.body).toBe(
+      '- Added guard against launching Claude Code inside another Claude Code session\n' +
+        '- Fixed Agent Teams using wrong model identifier for Bedrock, Vertex, and Foundry customers',
+    );
+  });
 });

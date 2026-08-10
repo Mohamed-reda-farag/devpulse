@@ -78,3 +78,74 @@ describe('groqClient — caps backoff even when Groq suggests a much longer wait
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
+
+describe('groqClient — proactively throttles on TPM headers, not just request count', () => {
+  it('waits out the TPM window when a prior response reported low remaining tokens, instead of firing immediately and hitting a 429', async () => {
+    // First call succeeds but reports we're nearly out of this minute's
+    // token budget (below TOKEN_RESERVE), with 45s left until it resets.
+    // Second call (a genuinely new, unrelated item) should NOT fire right
+    // after the base 2.2s interval — it should wait out that 45s window
+    // first, since request-count pacing alone can't see this coming.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockResponse(
+          200,
+          { choices: [{ message: { content: 'first summary' } }] },
+          { 'x-ratelimit-remaining-tokens': '50', 'x-ratelimit-reset-tokens': '45s' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockResponse(200, { choices: [{ message: { content: 'second summary' } }] }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.resetModules(); // module-level lastCallAt/tpmState must start clean for this test
+    const { summarize } = await import('../lib/groqClient.js');
+
+    const first = await summarize('first item text', 'Test Source');
+    expect(first).toBe('first summary');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const secondPromise = summarize('second item text', 'Test Source');
+
+    // Only the base 2.2s interval has passed — with no TPM guard this would
+    // already be enough to fire. It must NOT have fired yet.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Now advance past the reported 45s reset window — the second call
+    // should proceed.
+    await vi.advanceTimersByTimeAsync(45_000);
+    const second = await secondPromise;
+    expect(second).toBe('second summary');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not throttle proactively when remaining tokens are comfortably above the reserve', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockResponse(
+          200,
+          { choices: [{ message: { content: 'first summary' } }] },
+          { 'x-ratelimit-remaining-tokens': '11000', 'x-ratelimit-reset-tokens': '58s' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockResponse(200, { choices: [{ message: { content: 'second summary' } }] }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.resetModules();
+    const { summarize } = await import('../lib/groqClient.js');
+    await summarize('first item text', 'Test Source');
+
+    const secondPromise = summarize('second item text', 'Test Source');
+    // Only the base MIN_INTERVAL_MS (2.2s) should gate this — no TPM wait.
+    await vi.advanceTimersByTimeAsync(2_300);
+    const second = await secondPromise;
+    expect(second).toBe('second summary');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

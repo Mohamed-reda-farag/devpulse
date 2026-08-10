@@ -41,6 +41,27 @@ Phases 3–4. See each phase's `spec.md`, `plan.md`, and `tasks.md` for its exac
 > implemented — Phase 4 builds the actual scheduler): once scheduled, `npm run ingest` will run
 > **daily**, decoupled from the 3-day **digest** cadence in Article I — same total volume either
 > way, but spread across more resets of the daily quota instead of concentrated into one run.
+>
+> **Status (2026-08-10):** The TPD diagnosis above was real (confirmed via the dashboard) but
+> incomplete — 429s kept recurring on a later run even with that day's total Groq usage nowhere
+> near the 100K TPD ceiling (well under 50%), which ruled the daily quota out for *that*
+> particular run. The actual recurring cause: `groqClient.ts` only ever paced by *request count*
+> (`MIN_INTERVAL_MS`), never by *token volume* — but the binding free-tier constraint for
+> `llama-3.3-70b-versatile` is TPM (12K tokens/minute), separate from RPM (30/minute). A request
+> rate safely under 30/min can still exceed 12K TPM if individual requests carry enough tokens
+> each, which a request-count-only pace can't see coming. Fixed properly rather than by guessing
+> at interval numbers: Groq returns live `x-ratelimit-remaining-tokens` / `x-ratelimit-reset-tokens`
+> headers on every response, success or 429 — `groqClient.ts` now tracks these and proactively
+> waits out the TPM window *before* sending the next request once remaining budget drops below a
+> reserve (`TOKEN_RESERVE`), instead of firing blind and reacting to the 429 afterward. Also
+> trimmed `max_tokens` from 300 to 200 per call, since summaries are truncated to 500 characters
+> (roughly 125-150 tokens) regardless — the extra 100 was wasted TPM budget that never reached the
+> final output. Separately: this session also surfaced (and worked around) a real gotcha in
+> Supabase's Data API — a `GRANT`/`REVOKE` change doesn't auto-propagate to PostgREST's schema
+> cache the way a `CREATE TABLE`/`ALTER TABLE` does (those are DDL, `GRANT`/`REVOKE` are DCL, and
+> only DDL triggers Supabase's automatic reload); a migration ending in
+> `notify pgrst, 'reload schema';` is required after any grant change for it to take effect
+> immediately rather than eventually.
 
 ## Phase 1: Content Ingestion Pipeline
 
