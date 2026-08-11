@@ -28,3 +28,13 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          # lib/db/supabaseClient.ts constructs its client eagerly at import
+          # time, so merely importing lib/dedupe.ts (real, via vi.importActual
+          # in tests/ingest.test.ts, or directly in tests/dedupe.test.ts)
+          # requires these to be set — even though every test mocks
+          # loadExistingIds/insertNewItems and never makes a real Supabase
+          # call. Fake, non-secret placeholder values only; Article VI (no
+          # live network calls in the automated suite) still holds.
+          SUPABASE_URL: https://fake-ci-project.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: fake-ci-service-role-key
