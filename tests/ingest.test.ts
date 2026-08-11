@@ -85,7 +85,7 @@ describe('runIngest', () => {
 
     expect(result.newItems.map((i) => i.title)).toEqual(['Claude Code v2']);
     expect(insertNewItems).toHaveBeenCalledTimes(1);
-    const insertedItems = vi.mocked(insertNewItems).mock.calls[0][0];
+    const insertedItems = vi.mocked(insertNewItems).mock.calls[0]![0];
     expect(insertedItems.map((i) => i.title)).toEqual(['Claude Code v2']);
   });
 
