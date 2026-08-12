@@ -2,10 +2,11 @@
   "name": "devpulse",
   "version": "0.1.0",
   "private": true,
-  "description": "DevPulse — Phase 2: Database Layer",
+  "description": "DevPulse — Phase 3: Auth & User Preferences",
   "type": "module",
   "scripts": {
     "ingest": "tsx scripts/ingest.ts",
+    "dev": "next dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -13,22 +14,40 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
-    "zod": "^3.23.8",
     "cheerio": "^1.0.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "next": "^15.5.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
-    "tsx": "^4.16.5",
-    "vitest": "^2.0.5",
+    "@eslint/eslintrc": "^3.3.6",
     "@types/node": "^20.14.15",
-    "eslint": "^8.57.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
-    "prettier": "^3.3.3"
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^15.5.23",
+    "prettier": "^3.3.3",
+    "tsx": "^4.16.5",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
   },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "postcss": "^8.5.26",
+    "sharp": "^0.35.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "esbuild@0.21.5": true,
+    "sharp@0.34.5": true,
+    "unrs-resolver@1.12.2": true
   }
 }

@@ -38,3 +38,13 @@ jobs:
           # live network calls in the automated suite) still holds.
           SUPABASE_URL: https://fake-ci-project.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: fake-ci-service-role-key
+          # Phase 3: lib/supabase/client.ts and lib/supabase/server.ts throw
+          # eagerly if these aren't set. tests/onboarding/actions.test.ts
+          # mocks lib/supabase/server.ts entirely and never hits this path,
+          # but applying phase2_handoff.md §3.10's lesson proactively here
+          # (same class of "a module throws at import time before any test
+          # even runs" bug Phase 2 hit for real) rather than waiting to
+          # rediscover it. Fake, non-secret placeholder values only — same
+          # Article VI guarantee as above.
+          NEXT_PUBLIC_SUPABASE_URL: https://fake-ci-project.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: fake-ci-anon-key

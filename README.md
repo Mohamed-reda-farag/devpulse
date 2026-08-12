@@ -63,6 +63,77 @@ Phases 3–4. See each phase's `spec.md`, `plan.md`, and `tasks.md` for its exac
 > `notify pgrst, 'reload schema';` is required after any grant change for it to take effect
 > immediately rather than eventually.
 
+## Phase 3: Auth & User Preferences
+
+Adds real sign-in (Google or GitHub OAuth, via Supabase Auth) and a one-time onboarding step
+where a new person picks at least one of the five topics before going any further. This is the
+first phase to actually populate the `/app` folder — Next.js, React, and the App Router are
+introduced into this repository here, alongside (not replacing) Phase 1/2's standalone
+`lib`/`scripts`/`tests`/`supabase` structure.
+
+> **Status:** The real `tsconfig.json`, `vitest.config.ts`, `tests/setup.ts`, and `eslint.config.js`
+> were provided partway through this phase and reconciled against them directly (replacing an
+> earlier, less-informed pass that had reconstructed all four from scratch). Two real conflicts
+> surfaced, both confirmed against the live npm registry and by actually running `npm install` /
+> `lint` / `build` / `test` against the real files — not assumed from memory:
+>
+> 1. `@supabase/ssr`'s latest release requires `@supabase/supabase-js@^2.111.0` — incompatible with
+>    this project's existing `^2.45.4` pin from Phase 2. Bumping `supabase-js` itself was avoided
+>    (it's a shared dependency `scripts/ingest.ts` also uses, and this phase's `tasks.md` T002 only
+>    asked to add `@supabase/ssr` *alongside* the existing pin, not touch it). Used
+>    `@supabase/ssr@^0.5.2` instead — the newest version whose own peer requirement (`^2.43.4`) is
+>    satisfied by what Phase 2 already installed.
+> 2. The real `eslint.config.js` is already flat-config (ESLint 8.57's own built-in flat-config
+>    support — not a `.eslintrc` at all, and not an ESLint 9 migration), built around the split
+>    `@typescript-eslint/eslint-plugin` + `@typescript-eslint/parser` v7 packages, which hard-pin
+>    `eslint: ^8.56.0` as a peer. `eslint-config-next`'s latest major (16.x) ships a genuine
+>    flat-config export, but its own peer (`eslint >=9.0.0`) directly conflicts with that existing
+>    pin. Used `eslint-config-next@^15.5.0` instead (last line whose peer range still covers
+>    ESLint 8) — but 15.5.0 only ships the legacy `extends`-string shape, no native flat export, so
+>    it's bridged into the real `eslint.config.js` via `@eslint/eslintrc`'s `FlatCompat` (Next.js's
+>    own documented pattern for exactly this: a legacy shareable config inside a flat config file),
+>    scoped to `app/**` and `middleware.ts` only — `lib`/`scripts`/`tests` have no JSX and don't
+>    need React/Next-specific rules layered on. Revisit alongside a future ESLint 9 migration if
+>    `@typescript-eslint` is ever bumped past v7 project-wide — that's a real decision, not a
+>    default.
+>
+> The real `tsconfig.json` needed two small, additive changes (nothing else touched): it had no
+> `jsx` or DOM lib entries yet (expected — it predates any React/JSX code), and its `include` list
+> didn't cover the project-root `middleware.ts` Next.js requires living outside `app`/`lib`. Added
+> `"jsx": "preserve"`, `"dom"`/`"dom.iterable"` to `lib`, and `middleware.ts`/`next-env.d.ts`/
+> `.next/types/**/*.ts` to `include`. `vitest.config.ts` and `tests/setup.ts` needed no changes at
+> all. One thing found but deliberately *not* acted on: `tsconfig.json`'s `@/*` path alias isn't
+> wired into Vitest's own resolver (confirmed by actually trying it — `tsc` type-checks a `@/...`
+> import fine, but `vitest run` fails to load it at runtime with no `resolve.alias` or
+> `vite-tsconfig-paths` configured). Every Phase 3 import stayed relative rather than adding that
+> wiring unprompted — flag this if the team wants `@/` usable inside test files too.
+
+### Running it locally
+
+```bash
+npm install
+npm run dev
+```
+
+Visit `http://localhost:3000` — signed out, you'll be redirected to `/login`. Sign in with Google
+or GitHub, pick at least one topic on the one-time setup screen, and you'll land on a minimal
+"you're set up" placeholder (the real dashboard is Phase 6).
+
+### New environment variables (Phase 3)
+
+| Variable | Used by | Where to get it |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | `lib/supabase/client.ts`, `server.ts`, `middleware.ts` | Same project as `SUPABASE_URL` above — Supabase project → Settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Same three files | Same underlying value as `SUPABASE_ANON_KEY` above. **Name not yet live-verified** — Supabase has been transitioning some projects toward a "publishable key" naming; confirm the exact current name in your project's dashboard and adjust `.env.example` / your `.env` if it differs. |
+
+The Google and GitHub OAuth Client ID/Secret are **not** environment variables in this codebase at
+all — they're configured directly in the Supabase dashboard (Authentication → Providers). See the
+Manual Actions checklist in `phase3_tasks.md`.
+
+`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` from Phase 2 are unchanged and still used only by
+`scripts/ingest.ts` — no code in this phase touches the service role key at all (constitution
+Article III.2); every read/write here happens as the signed-in person, through Row Level Security.
+
 ## Phase 1: Content Ingestion Pipeline
 
 Fetches from five independent sources, normalizes everything into a single `ContentItem` shape
@@ -172,6 +243,14 @@ a real Supabase project (schema applied, RLS actually enforced, a real double-ru
 ## Project structure
 
 ```
+/app
+  layout.tsx                 Root layout (required by App Router)
+  login/page.tsx              "Sign in with Google/GitHub" — Client Component
+  auth/callback/route.ts      Exchanges the OAuth code for a session, then redirects
+  onboarding/
+    page.tsx                  Reads `topics` (public read), renders the 5 checkboxes
+    actions.ts                 Server Action: Zod-validates the selection, inserts into user_topics
+  (app)/page.tsx              Minimal "you're set up" placeholder (Phase 6 builds the real dashboard)
 /lib
   types.ts            Shared ContentItem contract (Article V)
   schemas.ts           7 Zod schemas, one per raw payload shape (Article III.11)
@@ -184,6 +263,12 @@ a real Supabase project (schema applied, RLS actually enforced, a real double-ru
     supabaseClient.ts    Server-side Supabase client — service role, never client-side (Article III.2)
   /sources
     claudeCode.ts codex.ts devTools.ts openModels.ts hackathons.ts
+  /supabase
+    client.ts             Browser Supabase client (anon key only) — Client Components only
+    server.ts              Server-side Supabase client (anon key + cookies) — Server Components/Actions
+    middleware.ts           Session-refresh cookie plumbing, used by the root middleware.ts
+  /onboarding
+    redirect.ts            Pure resolveRedirect() — the one piece of Phase 3 business logic
 /scripts
   ingest.ts             Orchestrates all five sources with per-source isolation
 /supabase
@@ -191,4 +276,9 @@ a real Supabase project (schema applied, RLS actually enforced, a real double-ru
 /tests
   dedupe.test.ts normalize.test.ts ingest.test.ts groqClient.test.ts
   /sources  (one test file per topic)
+  /onboarding
+    redirect.test.ts     Full-coverage unit tests for resolveRedirect (no mocking needed)
+    actions.test.ts       Zod-validation tests for the onboarding Server Action (Supabase mocked)
+middleware.ts          Project-root Next.js middleware: refreshes session, applies resolveRedirect
 ```
+
