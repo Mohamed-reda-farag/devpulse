@@ -134,6 +134,129 @@ Manual Actions checklist in `phase3_tasks.md`.
 `scripts/ingest.ts` — no code in this phase touches the service role key at all (constitution
 Article III.2); every read/write here happens as the signed-in person, through Row Level Security.
 
+> **Status (live verification complete):** All eight items in `phase3_tasks.md`'s Manual Actions
+> checklist are now confirmed by the project owner against a real Supabase project, real Google and
+> GitHub accounts, and a real pushed branch — not just passing locally. Two things were found only
+> during this live pass, both fixed and worth recording:
+>
+> - **`tsconfig.json`'s `ignoreDeprecations` flag went stale and had to be removed entirely**, not
+>   re-tuned to a new value. TypeScript shipped a real major version 7 (a from-scratch rewrite)
+>   since this project's dependencies were last touched; this project stays on `^5.5.4` (resolving
+>   to `5.9.3`, per the lockfile), which has no opinion on `baseUrl` at all. The confusion: VS
+>   Code's editor uses its *own* bundled TypeScript for live diagnostics, separate from the
+>   project's pinned `node_modules/typescript` — so a deprecation warning real to VS Code's (newer)
+>   bundled version showed up in the editor and its auto-fix, but was never real for what
+>   `npm run build`/CI actually run. Confirmed empirically: with `ignoreDeprecations` removed
+>   entirely, `tsc --noEmit` against the project's real pinned TypeScript produces zero warnings —
+>   the flag had nothing left to suppress. If this repo is opened in VS Code again, run
+>   **"TypeScript: Select TypeScript Version" → "Use Workspace Version"** once to stop the editor
+>   from disagreeing with what CI actually checks.
+> - **The `supabase/migrations/20260811090000_user_topics.sql` migration wasn't applied to the real
+>   Supabase project before the first live sign-in test** — missing from `phase3_tasks.md`'s Manual
+>   Actions checklist as its own explicit line item, which is why it was caught live (a masked
+>   "Could not save your topics" error) rather than upfront. Applied via the SQL Editor. A future
+>   phase's Manual Actions checklist should list "apply this phase's migration(s) to the real
+>   project" as its own first item, the way Phase 1/2's README already does for `npm run ingest`.
+>
+> Also confirmed live (was previously "confirmed via current docs, not tested" in `spec.md`'s edge
+> case): signing in with Google and GitHub under the *same verified email* really does get linked
+> into one Supabase Auth user automatically, no code needed — visible directly in
+> Authentication → Users as a single row with `Providers: GitHub, Google`. A second, genuinely
+> different email correctly created a separate account. See `phase3_spec.md`'s edge case for the
+> full note.
+>
+> One real gap surfaced but deliberately left alone: **this phase has no sign-out affordance** —
+> not an oversight in this session, `spec.md`/`plan.md` never scoped one. Testing "sign out and
+> back in" (`phase3_tasks.md`'s Manual Actions) was done via a fresh incognito window instead,
+> which exercises the same `resolveRedirect` path. Worth a decision before Phase 6 (dashboard) on
+> whether a real sign-out button belongs in this phase's `app/(app)/page.tsx` or is its own item.
+
+## Phase 4: Scheduling & Automation
+
+The ingestion pipeline (Phases 1–2, unchanged) now runs itself once a day instead of requiring
+someone to type `npm run ingest` by hand. This is a second, separate GitHub Actions workflow —
+`.github/workflows/ingest.yml` — alongside the existing `ci.yml` (lint/test/build on every push,
+unrelated to this phase). No application code (`lib/`, `scripts/ingest.ts`) was touched.
+
+### How the daily schedule works
+
+```yaml
+on:
+  schedule:
+    - cron: '17 3 * * *'   # 03:17 UTC, daily
+  workflow_dispatch: {}
+concurrency:
+  group: scheduled-ingestion
+  cancel-in-progress: false
+```
+
+- Runs once a day at `03:17` UTC — an arbitrary, off-the-hour time chosen specifically to avoid
+  the delay window GitHub's own scheduling guidance warns about around the top of every hour
+  (`:00`/`:30` are the worst). The exact hour doesn't matter; "once a day, reliably" does.
+- This is the daily **ingestion** cadence constitution Article I already establishes, decoupled
+  from Phase 5's future 3-day **digest** cadence — the two are not the same schedule and don't
+  need to run at the same time (see Risk Notes in `phase4_plan.md` for what Phase 5 will need to
+  avoid: racing this workflow).
+- The `concurrency` group means a manual trigger firing while a scheduled run is still in progress
+  queues behind it rather than running alongside it — two runs never touch `content_items` at the
+  same time (FR-005/SC-004).
+
+### Triggering a run manually
+
+No CLI needed. On GitHub: **Actions tab → "Scheduled Ingestion" (left sidebar) → "Run workflow"
+button → confirm on the default branch.** This satisfies FR-002/SC-003 with zero extra code — a
+manual `workflow_dispatch` run does exactly what a scheduled one does, and exactly what a local
+`npm run ingest` does.
+
+### Required GitHub repository secrets (Phase 4)
+
+Five secrets, added under **Settings → Secrets and variables → Actions**, using the same real
+values already in your local `.env`:
+
+| Secret name | Same value as local `.env` key |
+|---|---|
+| `GROQ_API_KEY` | `GROQ_API_KEY` |
+| `ARTIFICIAL_ANALYSIS_API_KEY` | `ARTIFICIAL_ANALYSIS_API_KEY` |
+| `LLM_STATS_API_KEY` | `LLM_STATS_API_KEY` |
+| `SUPABASE_URL` | `SUPABASE_URL` |
+| `SUPABASE_SERVICE_ROLE_KEY` | `SUPABASE_SERVICE_ROLE_KEY` |
+
+**These are not the same thing as the values already sitting in `ci.yml`'s `Test` step.** Those
+(`SUPABASE_URL: https://fake-ci-project.supabase.co`, etc.) are fake, non-secret placeholders that
+exist only so the mocked test suite can import `lib/dedupe.ts` without throwing at module-load
+time — no real service is ever contacted from `ci.yml`. The five secrets above are the real
+credentials, added separately, used only by `ingest.yml`. Don't confuse the two: pasting real
+values into `ci.yml`, or expecting `ci.yml`'s placeholders to make `ingest.yml` work, are both
+mistakes.
+
+### Failure notifications (FR-003)
+
+No new service, no new code. A scheduled workflow's failure notification goes natively to the
+GitHub account that created or last modified its cron schedule — but only if that account has
+Actions email/web notifications enabled (**Notification settings → Actions → Email or "On
+GitHub"**, optionally scoped to "Only notify for failed workflows"). This is opt-in, not automatic;
+confirming it's actually turned on is a Manual Action (`phase4_tasks.md`), not something this
+workflow file can guarantee by itself.
+
+### The 60-day silent-disable risk
+
+**Stated plainly, not buried:** GitHub automatically disables any scheduled workflow in a **public**
+repository after 60 consecutive days with no commit activity — opening issues or merging PRs
+doesn't count, only commits do. **This repository is currently public, so this risk applies as
+described.** When it happens, there's no banner or error anywhere in the Actions tab — only a
+single, easy-to-miss notification sent to whoever last enabled the workflow. For a solo-developer
+project that could plausibly go quiet on commits for two months while still expecting the daily
+pipeline to keep running, this is a real, live risk, not a hypothetical edge case.
+
+If this repository's visibility is ever changed to private, re-confirm this specific behavior
+before continuing to rely on this warning as-is — GitHub's own documentation states the 60-day
+auto-disable specifically for public repositories and does not confirm identical behavior for
+private ones.
+
+A more robust safeguard — an external check confirming the pipeline actually ran recently,
+independent of GitHub Actions itself — is explicitly **Phase 7**'s job, not built here. This phase
+documents the risk and relies on GitHub's own single warning notification; nothing more.
+
 ## Phase 1: Content Ingestion Pipeline
 
 Fetches from five independent sources, normalizes everything into a single `ContentItem` shape

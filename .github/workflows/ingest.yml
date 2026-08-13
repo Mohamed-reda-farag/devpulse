@@ -1,0 +1,29 @@
+name: Scheduled Ingestion
+
+on:
+  schedule:
+    - cron: '17 3 * * *'   # daily, an off-the-hour UTC time — avoids the exact top-of-hour load
+                            # spike GitHub's own scheduling guidance warns about (confirmed still
+                            # current practice during Phase 4 pre-implementation review)
+  workflow_dispatch: {}     # manual trigger, satisfies FR-002 with no extra code
+
+concurrency:
+  group: scheduled-ingestion
+  cancel-in-progress: false   # let an in-progress run finish; queue rather than kill it (FR-005/SC-004)
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22   # matches ci.yml exactly (confirmed during pre-implementation review)
+      - run: npm ci
+      - run: npm run ingest
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ARTIFICIAL_ANALYSIS_API_KEY: ${{ secrets.ARTIFICIAL_ANALYSIS_API_KEY }}
+          LLM_STATS_API_KEY: ${{ secrets.LLM_STATS_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
